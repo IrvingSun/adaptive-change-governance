@@ -1,13 +1,13 @@
 {
   "name": "adaptive-change-governance",
   "description": "Assess change risk, compose workflow gates, and collect human approval before technical planning or implementation.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": {
     "name": "Adaptive Change Governance Maintainers"
   },
   "license": "MIT",
-  "homepage": "https://example.local/adaptive-change-governance",
-  "repository": "https://example.local/adaptive-change-governance.git",
+  "homepage": "https://github.com/IrvingSun/adaptive-change-governance",
+  "repository": "https://github.com/IrvingSun/adaptive-change-governance.git",
   "keywords": [
     "governance",
     "risk",
