@@ -13,6 +13,7 @@ For plugin usage, the host model should first infer structured intent and pass i
 ```yaml
 version: 1
 change_kind: menu_label_change
+change_nature: display_text_only
 summary: rename one menu display label
 confidence: high
 scope:
@@ -81,6 +82,11 @@ file_risk:
     level: low
     reason: navigation and display shell
 ```
+
+File risk has two levels:
+
+- `highest_level`: inherent file importance from `file_risk` rules.
+- `effective_level`: risk after considering structured change intent. For example, a comment-only change in `app/database.py` keeps `highest_level: high` but may route with `effective_level: low`, while adding an UNKNOWN requiring the implementation diff to prove the change is comment-only.
 
 After workflow approval, generate and approve the technical plan before implementation:
 

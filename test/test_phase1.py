@@ -158,6 +158,38 @@ class Phase1Test(unittest.TestCase):
             shutil.rmtree(ui_temp)
             shutil.rmtree(db_temp)
 
+    def test_comment_only_change_lowers_effective_file_risk_but_keeps_inherent_risk(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            (temp / "app").mkdir(parents=True)
+            (temp / "app/database.py").write_text("# database connection name docs\nDATABASE_NAME = 'main'\n", encoding="utf-8")
+            intent = {
+                "version": 1,
+                "change_kind": "comment_change",
+                "change_nature": "comment_only",
+                "summary": "update a comment in database.py",
+                "confidence": "high",
+                "scope": {"included": ["comment only"], "excluded": ["executable code"], "unknowns": ["diff must confirm comment-only"]},
+                "risk_hints": {
+                    "data_operation": False,
+                    "database_schema_change": False,
+                    "public_interface_change": False,
+                    "permission_change": False,
+                    "security_change": False,
+                    "financial_change": False,
+                },
+            }
+            evidence = RepositoryAnalyzer(temp).analyze("修改 app/database.py 中的一行注释", self.project_risk, intent=intent)
+            risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)
+            file_risk = evidence["code_findings"]["file_risk"]
+            self.assertEqual("high", file_risk["highest_level"])
+            self.assertEqual("low", file_risk["effective_level"])
+            self.assertEqual("lowered_by_change_nature", file_risk["risk_adjustment"])
+            self.assertTrue(any("diff is comment" in item for item in evidence["unknowns"]))
+            self.assertEqual("L1", risk["final_level"])
+        finally:
+            shutil.rmtree(temp)
+
     def test_destructive_database_operation_cannot_drop_hard_gate(self):
         evidence = RepositoryAnalyzer(ROOT).analyze("删除重复的设备端口状态数据。", self.project_risk)
         risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)

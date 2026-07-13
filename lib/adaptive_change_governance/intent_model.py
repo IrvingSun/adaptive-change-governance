@@ -11,6 +11,14 @@ LOW_RISK_CHANGE_KINDS = {
     "menu_label_change",
     "ui_text_change",
     "documentation_change",
+    "comment_change",
+}
+
+LOW_RISK_CHANGE_NATURES = {
+    "comment_only",
+    "documentation_only",
+    "display_text_only",
+    "metadata_only",
 }
 
 RISKY_INTENT_FIELDS = {
@@ -36,6 +44,7 @@ def normalize_intent(intent: dict[str, Any] | None) -> dict[str, Any]:
     normalized = {
         "version": intent.get("version", 1),
         "change_kind": str(intent.get("change_kind", "") or ""),
+        "change_nature": str(intent.get("change_nature", "") or ""),
         "summary": str(intent.get("summary", "") or ""),
         "confidence": str(intent.get("confidence", "unknown") or "unknown"),
         "scope": {
@@ -55,7 +64,7 @@ def normalize_intent(intent: dict[str, Any] | None) -> dict[str, Any]:
 def is_low_risk_intent(intent: dict[str, Any]) -> bool:
     if not intent:
         return False
-    if intent.get("change_kind") not in LOW_RISK_CHANGE_KINDS:
+    if intent.get("change_kind") not in LOW_RISK_CHANGE_KINDS and intent.get("change_nature") not in LOW_RISK_CHANGE_NATURES:
         return False
     return not any(intent.get("risk_hints", {}).values())
 

@@ -140,7 +140,7 @@ class RiskEvaluator:
         domains = set(code.get("affected_domains", []))
         change_types = set(code.get("change_types", []))
         file_risk = code.get("file_risk", {})
-        file_risk_score = int(file_risk.get("highest_score", 1) or 1)
+        file_risk_score = int(file_risk.get("effective_score", file_risk.get("highest_score", 1)) or 1)
         critical_domains = set(self.project_risk.get("critical_domains", []))
         intrinsically_sensitive = {
             "financial-calculation",
@@ -163,7 +163,7 @@ class RiskEvaluator:
         }
         sensitive_change = bool(domains & (critical_domains | intrinsically_sensitive))
         doc_only = change_types and change_types <= {"documentation"} and not sensitive_change
-        text_only = bool(code.get("text_only_change")) and not sensitive_change and not code.get("database_changes") and not code.get("public_api_changes") and not code.get("message_schema_changes")
+        text_only = bool(code.get("text_only_change")) and not code.get("database_changes") and not code.get("public_api_changes") and not code.get("message_schema_changes")
         public_or_data_change = code.get("database_changes") or code.get("public_api_changes") or code.get("message_schema_changes")
         if doc_only or text_only:
             business_criticality = 1
@@ -242,7 +242,11 @@ class RiskEvaluator:
         ]
         file_risk = evidence.get("code_findings", {}).get("file_risk", {})
         if file_risk.get("matches"):
-            judgments.append(f"FACT: file risk highest level is {file_risk.get('highest_level')} from configured file_risk rules.")
+            judgments.append(
+                f"FACT: file risk inherent level is {file_risk.get('highest_level')} and effective level is {file_risk.get('effective_level')}."
+            )
+            if file_risk.get("risk_adjustment") != "none":
+                judgments.append("DECISION: file risk was adjusted by change nature, subject to diff verification.")
         if triggered:
             judgments.append("FACT: hard guardrails matched: " + ", ".join(item["id"] for item in triggered) + ".")
             for detail in self._triggered_guardrail_details(evidence):

@@ -12,8 +12,17 @@ FILE_RISK_SCORE = {
 }
 
 
-def evaluate_file_risk(paths: list[str], project_risk: dict[str, Any]) -> dict[str, Any]:
+LOW_EFFECTIVE_RISK_NATURES = {
+    "comment_only",
+    "documentation_only",
+    "display_text_only",
+    "metadata_only",
+}
+
+
+def evaluate_file_risk(paths: list[str], project_risk: dict[str, Any], intent: dict[str, Any] | None = None) -> dict[str, Any]:
     rules = project_risk.get("file_risk", [])
+    intent = intent or {}
     matches = []
     for path in paths:
         for rule in rules:
@@ -29,10 +38,20 @@ def evaluate_file_risk(paths: list[str], project_risk: dict[str, Any]) -> dict[s
                     "score": FILE_RISK_SCORE.get(level, 2),
                     "reason": str(rule.get("reason", "")),
                 })
-    highest = max((item["score"] for item in matches), default=1)
+    inherent = max((item["score"] for item in matches), default=1)
+    effective = _effective_score(inherent, intent)
+    constraints = []
+    if effective < inherent:
+        constraints.append(
+            "UNKNOWN: effective file risk was lowered by low-risk change intent; implementation gate must verify the diff is comment/documentation/display-only and does not change executable behavior."
+        )
     return {
-        "highest_level": _level_from_score(highest),
-        "highest_score": highest,
+        "highest_level": _level_from_score(inherent),
+        "highest_score": inherent,
+        "effective_level": _level_from_score(effective),
+        "effective_score": effective,
+        "risk_adjustment": "lowered_by_change_nature" if effective < inherent else "none",
+        "constraints": constraints,
         "matches": sorted(matches, key=lambda item: (-item["score"], item["path"], item["pattern"])),
     }
 
@@ -52,3 +71,9 @@ def _level_from_score(score: int) -> str:
     if score >= 2:
         return "medium"
     return "low"
+
+
+def _effective_score(inherent: int, intent: dict[str, Any]) -> int:
+    if str(intent.get("change_nature", "")) in LOW_EFFECTIVE_RISK_NATURES:
+        return 1
+    return inherent

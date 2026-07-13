@@ -91,7 +91,8 @@ class RepositoryAnalyzer:
 
         affected_domains = sorted(set(request_domains + file_domains))
         affected_modules = sorted({Path(item["path"]).parts[0] for item in direct_files + related_files if Path(item["path"]).parts})
-        file_risk = evaluate_file_risk([item["path"] for item in direct_files + related_files], project_risk)
+        file_risk = evaluate_file_risk([item["path"] for item in direct_files + related_files], project_risk, intent=intent)
+        unknowns.extend(file_risk.get("constraints", []))
 
         return {
             "version": 1,

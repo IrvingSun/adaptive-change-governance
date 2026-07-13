@@ -21,6 +21,7 @@ Required behavior:
 - Keep simple menu/copy changes lightweight unless strong evidence shows real data, interface, permission, or deletion impact.
 - Treat weak-only guardrail signals as candidates for confirmation, not as hard minimum level triggers.
 - Consider configured `file_risk` when explaining risk: small edits in database/auth/scheduler/API files can require heavier workflow than similar-sized UI text edits.
+- Distinguish inherent file risk from effective change risk. If the model classifies a high-risk file change as comment-only or docs-only, record that as intent and require later diff verification.
 - Stop after `workflow-plan.md` until human approval is present.
 - Do not generate a technical plan before workflow approval.
 - Do not modify business code before technical-plan approval and implementation gate check.

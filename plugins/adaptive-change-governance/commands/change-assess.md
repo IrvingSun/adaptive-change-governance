@@ -11,6 +11,7 @@ First infer the user's change intent and write it to a temporary YAML file. Trea
 ```yaml
 version: 1
 change_kind: menu_label_change
+change_nature: display_text_only
 summary: short intent summary
 confidence: high
 scope:
@@ -82,6 +83,7 @@ Hard constraints:
 - Weak-only guardrail candidates require human confirmation but must not set the hard minimum level.
 - Low-risk menu or copy changes should stay lightweight unless strong code evidence shows data, interface, permission, or deletion impact.
 - File importance from `file_risk` must influence routing: database, auth, migration, scheduler, and API files are higher impact than UI copy files even when the diff size is similar.
+- Distinguish inherent file importance from effective change risk. A comment-only change in a high-risk file may stay lightweight only when structured intent says `change_nature: comment_only`, and the implementation diff must later prove that no executable behavior changed.
 - Workflow approval must happen before technical planning.
 - Technical-plan approval must happen before business-code edits.
 - Implementation must be preceded by `change-assess --check-gate <run_id> --stage implementation`.
