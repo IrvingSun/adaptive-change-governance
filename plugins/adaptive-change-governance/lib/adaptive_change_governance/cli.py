@@ -10,6 +10,7 @@ from .config_loader import ConfigError, dump_yaml, load_yaml
 from .human_review import HumanReviewGate, ReviewError
 from .repository_analyzer import RepositoryAnalyzer
 from .risk_evaluator import RiskEvaluator
+from .run_retention import cleanup_runs, render_cleanup_summary
 from .schema_validator import ValidationError, validate_all
 from .workflow_composer import WorkflowComposer
 
@@ -27,6 +28,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--review-workflow", help="Print workflow review options for an existing run id or run directory")
     parser.add_argument("--approve-workflow", help="Approve workflow for an existing run id or run directory")
     parser.add_argument("--review-decision", help="Set review decision for an existing run id or run directory")
+    parser.add_argument("--cleanup-runs", action="store_true", help="Clean old .ai-governance/runs entries according to audit_retention policy")
+    parser.add_argument("--cleanup-dry-run", action="store_true", help="Show which run entries would be deleted without deleting them")
     parser.add_argument("--decision", choices=["approve", "reject", "request_changes", "reassess"])
     parser.add_argument("--reviewer")
     parser.add_argument("--raise-level", choices=["L1", "L2", "L3", "L4"])
@@ -68,6 +71,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.approve_workflow:
         return _approve_workflow(root, Path(args.output), args.approve_workflow, args, project_risk, workflow_modules)
+
+    if args.cleanup_runs:
+        return _cleanup_runs(root, Path(args.output), project_risk, args.cleanup_dry_run)
 
     if args.mode != "assess":
         return _guarded_mode(args.mode)
@@ -167,6 +173,13 @@ def _approve_workflow(root: Path, output_root: Path, run_id: str, args: argparse
         return 3
     print(f"Workflow approved: {run_dir}")
     print(gate.approved_summary(approved), end="")
+    return 0
+
+
+def _cleanup_runs(root: Path, output_root: Path, project_risk: dict, dry_run: bool) -> int:
+    policy = project_risk.get("audit_retention", {})
+    result = cleanup_runs(root / output_root, policy, dry_run=dry_run)
+    print(render_cleanup_summary(result), end="")
     return 0
 
 

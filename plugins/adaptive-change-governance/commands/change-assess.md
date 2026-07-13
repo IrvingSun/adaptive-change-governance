@@ -27,6 +27,15 @@ change-assess --approve-workflow <run_id> --raise-level L4 --reason "reason"
 
 Use `change-assess --review-decision <run_id> --decision reassess --comment "reason"` when the user requests reassessment instead of approval.
 
+For local run retention, use:
+
+```bash
+change-assess --cleanup-runs --cleanup-dry-run
+change-assess --cleanup-runs
+```
+
+Do not ask users to commit `.ai-governance/runs/`; it is a local audit and gate-state directory and should stay gitignored unless the user explicitly chooses another audit mode.
+
 Hard constraints:
 
 - Treat user input as a request, not code fact.

@@ -29,7 +29,7 @@ The tool stops at `workflow_plan_approval`. Review and approve from the CLI:
 ```bash
 bin/change-assess --review-workflow <run_id>
 bin/change-assess --approve-workflow <run_id>
-bin/change-assess --approve-workflow <run_id> --reviewer sun --add-required threat_analysis
+bin/change-assess --approve-workflow <run_id> --add-required threat_analysis
 bin/change-assess --review-decision <run_id> --decision reassess --comment "needs dependency analysis"
 ```
 
@@ -40,6 +40,24 @@ Approval writes:
 - `.workflow-approved`
 
 Human reviewers can add modules, raise risk, and correct AI assumptions from CLI flags. `human-review.yaml` remains as the audit file, but users do not need to edit it manually. They cannot lower hard-guardrail decisions or remove hard-required modules.
+
+Run artifacts under `.ai-governance/runs/` are local audit and gate-state files. They are ignored by Git by default. Use the retention policy in `.ai-governance/project-risk.yaml` to control local history size:
+
+```yaml
+audit_retention:
+  audit_mode: gitignored
+  retain_latest: 20
+  retain_days: 30
+```
+
+Preview or apply cleanup:
+
+```bash
+bin/change-assess --cleanup-runs --cleanup-dry-run
+bin/change-assess --cleanup-runs
+```
+
+Cleanup removes old approved/inactive runs only; active runs waiting for workflow approval are skipped.
 
 ## Claude Code plugin
 

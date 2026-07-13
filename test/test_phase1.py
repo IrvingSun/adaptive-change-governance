@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +15,7 @@ from adaptive_change_governance.config_loader import load_yaml
 import adaptive_change_governance.cli as cli_module
 from adaptive_change_governance.human_review import HumanReviewGate, ReviewError
 from adaptive_change_governance.repository_analyzer import RepositoryAnalyzer
+from adaptive_change_governance.run_retention import cleanup_runs
 from adaptive_change_governance.risk_evaluator import RiskEvaluator
 from adaptive_change_governance.schema_validator import ValidationError, validate_all
 from adaptive_change_governance.workflow_composer import WorkflowComposer
@@ -35,6 +37,12 @@ class Phase1Test(unittest.TestCase):
         bad = dict(self.project_risk)
         bad["project"] = {"name": "bad", "baseline_level": "LX"}
         with self.assertRaisesRegex(ValidationError, "baseline_level"):
+            validate_all(bad, self.guardrails, self.modules)
+
+    def test_audit_retention_policy_validates(self):
+        bad = dict(self.project_risk)
+        bad["audit_retention"] = {"audit_mode": "git", "retain_latest": 0, "retain_days": 30}
+        with self.assertRaisesRegex(ValidationError, "audit_retention"):
             validate_all(bad, self.guardrails, self.modules)
 
     def test_money_change_triggers_hard_guardrail_and_required_modules(self):
@@ -338,6 +346,38 @@ class Phase1Test(unittest.TestCase):
             self.assertIn("Guardrail evidence", review.stdout)
             self.assertIn("DECISION: triggered destructive-database-operation", review.stdout)
             self.assertIn("FACT: user_request contains keyword '删除'", review.stdout)
+        finally:
+            shutil.rmtree(temp)
+
+    def test_cleanup_runs_deletes_only_old_inactive_runs(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            runs = temp / ".ai-governance" / "runs"
+            old_done = runs / "20260101-000000-old-done"
+            old_active = runs / "20260101-000001-old-active"
+            fresh_done = runs / "20260713-000000-fresh-done"
+            for run_dir in (old_done, old_active, fresh_done):
+                run_dir.mkdir(parents=True)
+                (run_dir / "workflow-plan.md").write_text("plan", encoding="utf-8")
+                (run_dir / "human-review.yaml").write_text("version: 1\n", encoding="utf-8")
+            (old_done / ".workflow-approved").write_text("approved\n", encoding="utf-8")
+            (fresh_done / ".workflow-approved").write_text("approved\n", encoding="utf-8")
+            old_time = (datetime.now(timezone.utc) - timedelta(days=90)).timestamp()
+            fresh_time = datetime.now(timezone.utc).timestamp()
+            for path in (old_done, old_active):
+                os.utime(path, (old_time, old_time))
+            os.utime(fresh_done, (fresh_time, fresh_time))
+
+            dry = cleanup_runs(runs, {"retain_latest": 1, "retain_days": 30}, dry_run=True)
+            self.assertIn(old_done, dry.deleted)
+            self.assertIn(old_active, dry.skipped)
+            self.assertTrue(old_done.exists())
+
+            result = cleanup_runs(runs, {"retain_latest": 1, "retain_days": 30}, dry_run=False)
+            self.assertIn(old_done, result.deleted)
+            self.assertFalse(old_done.exists())
+            self.assertTrue(old_active.exists())
+            self.assertTrue(fresh_done.exists())
         finally:
             shutil.rmtree(temp)
 

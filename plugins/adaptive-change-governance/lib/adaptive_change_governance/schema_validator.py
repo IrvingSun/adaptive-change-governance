@@ -37,6 +37,14 @@ def validate_project_risk(data: dict[str, Any]) -> None:
                 raise ValidationError(f"{section}.{key} must be an integer from 1 to 5")
     for key in ("critical_domains", "critical_paths", "known_constraints", "default_human_gates"):
         _require_list(data, key, "project-risk.yaml")
+    if "audit_retention" in data:
+        retention = _require_mapping(data, "audit_retention", "project-risk.yaml")
+        if retention.get("audit_mode", "gitignored") not in {"local", "gitignored", "external"}:
+            raise ValidationError("audit_retention.audit_mode must be local, gitignored, or external")
+        for key in ("retain_latest", "retain_days"):
+            value = retention.get(key)
+            if value is not None and (not isinstance(value, int) or value < 1):
+                raise ValidationError(f"audit_retention.{key} must be a positive integer")
 
 
 def validate_guardrails(data: dict[str, Any]) -> None:

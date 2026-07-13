@@ -1,6 +1,6 @@
 {
   "name": "adaptive-change-governance",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Reusable change governance and workflow routing for AI coding agents.",
   "author": {
     "name": "Adaptive Change Governance Maintainers"

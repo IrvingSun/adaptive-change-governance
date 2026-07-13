@@ -20,6 +20,7 @@ Required behavior:
 - Do not generate a technical plan or modify business code before approval gates.
 
 Use command-line review and approval. Do not ask users to manually edit `human-review.yaml`; it is an audit file.
+Run artifacts in `.ai-governance/runs/` are local audit and gate-state files; keep them gitignored by default. Use `change-assess --cleanup-runs --cleanup-dry-run` before deleting old runs.
 
 ```bash
 change-assess --review-workflow <run_id>

@@ -63,6 +63,11 @@ default_human_gates:
   - technical_plan_approval
   - implementation_approval
 
+audit_retention:
+  audit_mode: gitignored
+  retain_latest: 20
+  retain_days: 30
+
 domain_keywords:
   financial-calculation:
     - money
