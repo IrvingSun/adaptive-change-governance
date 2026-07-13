@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Final level: {risk['final_level']}")
     print(f"Triggered guardrails: {risk['triggered_guardrails'] or []}")
     print("Next gate: workflow_plan_approval")
-    print(f"Review files: {run_dir / 'review.md'} and {run_dir / 'human-review.yaml'}")
+    print(f"Review command: change-assess --review-workflow {run_dir.name}")
     print("No technical plan or business-code changes were produced.")
     return 0
 

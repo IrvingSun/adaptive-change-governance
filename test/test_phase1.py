@@ -131,12 +131,17 @@ class Phase1Test(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("Review command: change-assess --review-workflow", result.stdout)
             runs = list((temp / ".ai-governance/runs").iterdir())
             self.assertEqual(1, len(runs))
             for artifact in ("evidence-pack.yaml", "risk-assessment.yaml", "workflow-plan.md"):
                 self.assertTrue((runs[0] / artifact).exists(), artifact)
             for artifact in ("review.md", "human-review.yaml"):
                 self.assertTrue((runs[0] / artifact).exists(), artifact)
+            review_md = (runs[0] / "review.md").read_text(encoding="utf-8")
+            self.assertIn("Review Commands", review_md)
+            self.assertNotIn("Editable File", review_md)
+            self.assertNotIn("Edit `human-review.yaml`", review_md)
             self.assertFalse((runs[0] / "technical-plan.md").exists())
             workflow_plan = (runs[0] / "workflow-plan.md").read_text(encoding="utf-8")
             self.assertIn("不得生成 technical-plan", workflow_plan)

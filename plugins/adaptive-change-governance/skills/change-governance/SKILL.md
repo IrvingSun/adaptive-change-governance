@@ -19,13 +19,7 @@ Required behavior:
 - Stop after `workflow-plan.md` until human approval is present.
 - Do not generate a technical plan or modify business code before approval gates.
 
-For workflow approval after the user edits `human-review.yaml`:
-
-```bash
-change-assess --approve-workflow <run_id>
-```
-
-Prefer command-line review over asking the user to edit YAML:
+Use command-line review and approval. Do not ask users to manually edit `human-review.yaml`; it is an audit file.
 
 ```bash
 change-assess --review-workflow <run_id>
