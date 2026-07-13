@@ -73,9 +73,12 @@ class RepositoryAnalyzer:
         request_domains = self._match_keywords(request, domain_keywords)
         request_domain_evidence = self._keyword_evidence(request, domain_keywords, "user_request")
         file_domains = self._domains_from_paths(direct_files, domain_keywords)
+        text_only_change = self._is_text_only_change(request)
         change_types = sorted(set(self._match_keywords(request, CHANGE_TYPE_KEYWORDS) + self._change_types_from_paths(direct_files)))
+        if text_only_change:
+            change_types = self._text_only_change_types(change_types)
         change_type_evidence = self._keyword_evidence(request, CHANGE_TYPE_KEYWORDS, "user_request")
-        operations, operation_evidence = self._operation_findings(request, direct_files)
+        operations, operation_evidence = self._operation_findings(request, direct_files, text_only_change)
         database_changes = "database_schema" in change_types or bool({"delete", "truncate", "irreversible_migration", "bulk_update"} & set(operations))
         public_api_changes = "public_api" in change_types
         message_schema_changes = "message_schema" in change_types
@@ -106,6 +109,7 @@ class RepositoryAnalyzer:
                 "database_changes": database_changes,
                 "message_schema_changes": message_schema_changes,
                 "public_api_changes": public_api_changes,
+                "text_only_change": text_only_change,
                 "scheduled_jobs_affected": self._path_or_request_matches(direct_files, request, ["cron", "job", "scheduler", "定时"]),
                 "configuration_changes": "configuration" in change_types,
             },
@@ -249,6 +253,30 @@ class RepositoryAnalyzer:
         criteria.append("INFERENCE: change should satisfy the user request without introducing regression in affected modules.")
         return criteria
 
+    def _is_text_only_change(self, request: str) -> bool:
+        lower = request.lower()
+        text_markers = ["文案", "提示", "标题", "菜单", "显示名", "label", "title", "copy", "rename"]
+        change_markers = ["修改", "改为", "更名", "重命名", "rename", "change"]
+        risky_markers = [
+            "删除",
+            "移除",
+            "数据库",
+            "数据",
+            "接口",
+            "api",
+            "权限",
+            "delete",
+            "remove",
+            "database",
+            "sql",
+        ]
+        return any(marker in lower for marker in text_markers) and any(marker in lower for marker in change_markers) and not any(marker in lower for marker in risky_markers)
+
+    def _text_only_change_types(self, change_types: list[str]) -> list[str]:
+        allowed = {"documentation", "configuration"}
+        filtered = [item for item in change_types if item in allowed]
+        return sorted(set(filtered or ["documentation"]))
+
     def _match_keywords(self, text: str, mapping: dict[str, list[str]]) -> list[str]:
         lower = text.lower()
         return sorted([key for key, words in mapping.items() if any(word.lower() in lower for word in words)])
@@ -269,9 +297,17 @@ class RepositoryAnalyzer:
                     break
         return evidence
 
-    def _operation_findings(self, request: str, findings: list[dict[str, str]]) -> tuple[list[str], list[dict[str, str]]]:
+    def _operation_findings(self, request: str, findings: list[dict[str, str]], text_only_change: bool = False) -> tuple[list[str], list[dict[str, str]]]:
         operations = set()
         evidence = []
+        if text_only_change:
+            return [], [{
+                "value": "text_only_change",
+                "source": "user_request",
+                "keyword": "menu_or_copy",
+                "strength": "strong",
+                "fact": "FACT: user_request is a menu/copy display-text change; file-level delete/remove keywords are not treated as requested operations.",
+            }]
         request_ops = self._keyword_evidence(request, OPERATION_KEYWORDS, "user_request")
         request_has_data_context = self._has_data_operation_context(request)
         for item in request_ops:

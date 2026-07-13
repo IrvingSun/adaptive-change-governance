@@ -41,6 +41,8 @@ Approval writes:
 
 Human reviewers can add modules, raise risk, and correct AI assumptions from CLI flags. `human-review.yaml` remains as the audit file, but users do not need to edit it manually. They cannot lower hard-guardrail decisions or remove hard-required modules.
 
+Low-risk menu or copy changes are routed through the lightweight path when the request does not include data, interface, permission, or deletion work. Weak guardrail signals are shown as candidates for human confirmation, but they do not set the hard minimum risk level unless supported by strong evidence.
+
 After workflow approval, generate and approve the technical plan before implementation:
 
 ```bash

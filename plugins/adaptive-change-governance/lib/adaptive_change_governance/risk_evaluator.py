@@ -27,8 +27,9 @@ class RiskEvaluator:
     guardrails: dict[str, Any]
 
     def evaluate(self, evidence: dict[str, Any]) -> dict[str, Any]:
-        triggered = self._triggered_guardrails(evidence)
         triggered_details = self._triggered_guardrail_details(evidence)
+        triggered = self._triggered_guardrails(evidence, triggered_details)
+        weak_candidates = [item for item in triggered_details if item.get("strength") == "weak"]
         dimensions = self._score_dimensions(evidence, triggered)
         weighted_score = round(sum(dimensions[key] * weight for key, weight in WEIGHTS.items()), 2)
         calculated_level = self._level_from_score(weighted_score)
@@ -47,17 +48,19 @@ class RiskEvaluator:
             "final_level": final_level,
             "triggered_guardrails": [item["id"] for item in triggered],
             "triggered_guardrail_details": triggered_details,
+            "weak_guardrail_candidates": weak_candidates,
             "required_by_guardrails": required_by_guardrails,
             "prohibited": prohibited,
             "judgments": self._judgments(evidence, triggered, dimensions, calculated_level, final_level),
         }
 
-    def _triggered_guardrails(self, evidence: dict[str, Any]) -> list[dict[str, Any]]:
+    def _triggered_guardrails(self, evidence: dict[str, Any], details: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
         facts = self._fact_index(evidence)
+        strong_ids = {item["id"] for item in details or [] if item.get("strength") == "strong"}
         triggered = []
         for guardrail in self.guardrails.get("hard_guardrails", []):
             conditions = guardrail.get("when", {}).get("any", [])
-            if any(self._condition_matches(condition, facts) for condition in conditions):
+            if guardrail["id"] in strong_ids and any(self._condition_matches(condition, facts) for condition in conditions):
                 triggered.append(guardrail)
         return triggered
 
@@ -158,12 +161,13 @@ class RiskEvaluator:
         }
         sensitive_change = bool(domains & (critical_domains | intrinsically_sensitive))
         doc_only = change_types and change_types <= {"documentation"} and not sensitive_change
+        text_only = bool(code.get("text_only_change")) and not sensitive_change and not code.get("database_changes") and not code.get("public_api_changes") and not code.get("message_schema_changes")
         public_or_data_change = code.get("database_changes") or code.get("public_api_changes") or code.get("message_schema_changes")
-        if doc_only:
+        if doc_only or text_only:
             business_criticality = 1
             production_impact = 1
             change_scope = 1
-            uncertainty = 2 + (1 if not code.get("direct_files") else 0)
+            uncertainty = 1 + (1 if not code.get("direct_files") else 0)
             reversibility = 1
             data_risk = 1
             testability_risk = 1
@@ -233,6 +237,9 @@ class RiskEvaluator:
                     judgments.extend(item["text"] for item in match["evidence"][:2])
                 judgments.append(detail["decision"])
             judgments.append("DECISION: final level cannot be lower than hard guardrail minimum.")
+        weak_candidates = [item["id"] for item in self._triggered_guardrail_details(evidence) if item.get("strength") == "weak"]
+        if weak_candidates:
+            judgments.append("WEAK SIGNAL: guardrail candidates need human confirmation and do not set hard minimum level: " + ", ".join(weak_candidates) + ".")
         if evidence.get("unknowns"):
             normalized_unknowns = [item.replace("UNKNOWN: ", "", 1) for item in evidence["unknowns"][:3]]
             judgments.append("UNKNOWN: " + "; ".join(normalized_unknowns))

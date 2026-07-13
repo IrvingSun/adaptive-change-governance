@@ -53,6 +53,8 @@ Hard constraints:
 - Treat user input as a request, not code fact.
 - Analyze repository facts before risk scoring.
 - Hard guardrails cannot be downgraded or removed.
+- Weak-only guardrail candidates require human confirmation but must not set the hard minimum level.
+- Low-risk menu or copy changes should stay lightweight unless strong code evidence shows data, interface, permission, or deletion impact.
 - Workflow approval must happen before technical planning.
 - Technical-plan approval must happen before business-code edits.
 - Implementation must be preceded by `change-assess --check-gate <run_id> --stage implementation`.

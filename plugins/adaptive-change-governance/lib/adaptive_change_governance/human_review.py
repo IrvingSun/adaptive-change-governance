@@ -124,6 +124,7 @@ class HumanReviewGate:
             f"Request: {evidence['request']['original']}",
             f"Final level: {rec['final_level']}",
             f"Triggered guardrails: {rec.get('triggered_guardrails', [])}",
+            f"Weak guardrail candidates: {[item.get('id') for item in risk.get('weak_guardrail_candidates', [])]}",
             f"Prohibited actions: {rec.get('prohibited', [])}",
             "",
             "Guardrail evidence:",

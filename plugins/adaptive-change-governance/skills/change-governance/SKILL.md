@@ -16,6 +16,8 @@ Required behavior:
 - Treat user input as request, not code fact.
 - Analyze current repository state before scoring risk.
 - Apply hard guardrails before workflow composition.
+- Keep simple menu/copy changes lightweight unless strong evidence shows real data, interface, permission, or deletion impact.
+- Treat weak-only guardrail signals as candidates for confirmation, not as hard minimum level triggers.
 - Stop after `workflow-plan.md` until human approval is present.
 - Do not generate a technical plan before workflow approval.
 - Do not modify business code before technical-plan approval and implementation gate check.

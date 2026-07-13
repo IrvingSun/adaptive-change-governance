@@ -70,6 +70,29 @@ class Phase1Test(unittest.TestCase):
         self.assertEqual(["code_fact_scan", "regression_test"], rec["required_modules"])
         self.assertTrue(any(item["module"] == "technical_design" for item in rec["skipped_modules"]))
 
+    def test_menu_label_change_remains_lightweight_despite_unrelated_keywords(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            (temp / "frontend/src/layouts").mkdir(parents=True)
+            (temp / "frontend/src/layouts/BotLayout.vue").write_text("<span>群配置</span>\n", encoding="utf-8")
+            (temp / "app/bot").mkdir(parents=True)
+            (temp / "app/bot/handler.py").write_text(
+                "def clean_group_config_cache():\n"
+                "    sql = 'delete from cache_items where name = 群配置'\n"
+                "    return {'api_schema': 'message'}\n",
+                encoding="utf-8",
+            )
+            evidence = RepositoryAnalyzer(temp).analyze("把后台「群配置」相关的菜单修改为「业务群配置」", self.project_risk)
+            risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)
+            workflow = WorkflowComposer(self.project_risk, self.modules).compose(evidence, risk)
+            self.assertTrue(evidence["code_findings"]["text_only_change"])
+            self.assertEqual([], risk["triggered_guardrails"])
+            self.assertEqual("L1", risk["final_level"])
+            self.assertEqual(["code_fact_scan", "regression_test"], workflow["workflow_recommendation"]["required_modules"])
+            self.assertNotIn("direct_production_execution", workflow["workflow_recommendation"]["prohibited"])
+        finally:
+            shutil.rmtree(temp)
+
     def test_destructive_database_operation_cannot_drop_hard_gate(self):
         evidence = RepositoryAnalyzer(ROOT).analyze("删除重复的设备端口状态数据。", self.project_risk)
         risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)
@@ -529,6 +552,7 @@ class Phase1Test(unittest.TestCase):
         }
         risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)
         public_detail = next(item for item in risk["triggered_guardrail_details"] if item["id"] == "public-interface-change")
+        self.assertNotIn("public-interface-change", risk["triggered_guardrails"])
         self.assertEqual("weak", public_detail["strength"])
         self.assertTrue(public_detail["needs_human_confirmation"])
 
