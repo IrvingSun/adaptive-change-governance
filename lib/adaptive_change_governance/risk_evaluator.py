@@ -139,6 +139,8 @@ class RiskEvaluator:
         unknowns = evidence.get("unknowns", [])
         domains = set(code.get("affected_domains", []))
         change_types = set(code.get("change_types", []))
+        file_risk = code.get("file_risk", {})
+        file_risk_score = int(file_risk.get("highest_score", 1) or 1)
         critical_domains = set(self.project_risk.get("critical_domains", []))
         intrinsically_sensitive = {
             "financial-calculation",
@@ -197,6 +199,14 @@ class RiskEvaluator:
             dimensions["uncertainty"] = max(dimensions["uncertainty"], 4)
         if code.get("public_api_changes") or code.get("message_schema_changes"):
             dimensions["production_impact"] = max(dimensions["production_impact"], 4)
+        if file_risk_score >= 4:
+            dimensions["business_criticality"] = max(dimensions["business_criticality"], 3)
+            dimensions["production_impact"] = max(dimensions["production_impact"], 3)
+            dimensions["uncertainty"] = max(dimensions["uncertainty"], 3)
+            dimensions["reversibility"] = max(dimensions["reversibility"], 3)
+        if file_risk_score >= 5:
+            dimensions["data_risk"] = max(dimensions["data_risk"], 4)
+            dimensions["production_impact"] = max(dimensions["production_impact"], 4)
         return {key: min(5, max(1, value)) for key, value in dimensions.items()}
 
     def _has_security_domain(self, code: dict[str, Any]) -> bool:
@@ -230,6 +240,9 @@ class RiskEvaluator:
             f"FACT: risk dimensions were scored with rule weights: {dimensions}.",
             f"DECISION: calculated level is {calculated}.",
         ]
+        file_risk = evidence.get("code_findings", {}).get("file_risk", {})
+        if file_risk.get("matches"):
+            judgments.append(f"FACT: file risk highest level is {file_risk.get('highest_level')} from configured file_risk rules.")
         if triggered:
             judgments.append("FACT: hard guardrails matched: " + ", ".join(item["id"] for item in triggered) + ".")
             for detail in self._triggered_guardrail_details(evidence):

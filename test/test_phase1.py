@@ -136,6 +136,28 @@ class Phase1Test(unittest.TestCase):
         finally:
             shutil.rmtree(temp)
 
+    def test_file_risk_makes_database_file_higher_risk_than_ui_copy(self):
+        ui_temp = Path(tempfile.mkdtemp())
+        db_temp = Path(tempfile.mkdtemp())
+        try:
+            (ui_temp / "frontend/src/layouts").mkdir(parents=True)
+            (ui_temp / "frontend/src/layouts/BotLayout.vue").write_text("<span>群配置</span>\n", encoding="utf-8")
+            ui_evidence = RepositoryAnalyzer(ui_temp).analyze("把后台「群配置」相关的菜单修改为「业务群配置」", self.project_risk)
+            ui_risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(ui_evidence)
+
+            (db_temp / "app").mkdir(parents=True)
+            (db_temp / "app/database.py").write_text("DATABASE_NAME = 'main'\n", encoding="utf-8")
+            db_evidence = RepositoryAnalyzer(db_temp).analyze("修改数据库连接名称 database", self.project_risk)
+            db_risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(db_evidence)
+
+            self.assertEqual("low", ui_evidence["code_findings"]["file_risk"]["highest_level"])
+            self.assertEqual("high", db_evidence["code_findings"]["file_risk"]["highest_level"])
+            self.assertEqual("L1", ui_risk["final_level"])
+            self.assertGreater({"L1": 1, "L2": 2, "L3": 3, "L4": 4}[db_risk["final_level"]], {"L1": 1, "L2": 2, "L3": 3, "L4": 4}[ui_risk["final_level"]])
+        finally:
+            shutil.rmtree(ui_temp)
+            shutil.rmtree(db_temp)
+
     def test_destructive_database_operation_cannot_drop_hard_gate(self):
         evidence = RepositoryAnalyzer(ROOT).analyze("删除重复的设备端口状态数据。", self.project_risk)
         risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)

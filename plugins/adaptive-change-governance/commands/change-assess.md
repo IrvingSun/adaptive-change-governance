@@ -81,6 +81,7 @@ Hard constraints:
 - Hard guardrails cannot be downgraded or removed.
 - Weak-only guardrail candidates require human confirmation but must not set the hard minimum level.
 - Low-risk menu or copy changes should stay lightweight unless strong code evidence shows data, interface, permission, or deletion impact.
+- File importance from `file_risk` must influence routing: database, auth, migration, scheduler, and API files are higher impact than UI copy files even when the diff size is similar.
 - Workflow approval must happen before technical planning.
 - Technical-plan approval must happen before business-code edits.
 - Implementation must be preceded by `change-assess --check-gate <run_id> --stage implementation`.

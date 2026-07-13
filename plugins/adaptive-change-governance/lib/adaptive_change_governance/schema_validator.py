@@ -45,6 +45,15 @@ def validate_project_risk(data: dict[str, Any]) -> None:
             value = retention.get(key)
             if value is not None and (not isinstance(value, int) or value < 1):
                 raise ValidationError(f"audit_retention.{key} must be a positive integer")
+    if "file_risk" in data:
+        rules = _require_list(data, "file_risk", "project-risk.yaml")
+        for index, rule in enumerate(rules):
+            if not isinstance(rule, dict):
+                raise ValidationError(f"file_risk[{index}] must be a mapping")
+            if not rule.get("pattern"):
+                raise ValidationError(f"file_risk[{index}].pattern is required")
+            if rule.get("level") not in {"low", "medium", "high", "critical"}:
+                raise ValidationError(f"file_risk[{index}].level must be low, medium, high, or critical")
 
 
 def validate_guardrails(data: dict[str, Any]) -> None:

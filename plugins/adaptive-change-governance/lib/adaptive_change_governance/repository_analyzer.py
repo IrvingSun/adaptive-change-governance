@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .file_risk import evaluate_file_risk
 from .intent_model import is_low_risk_intent
 
 
@@ -90,6 +91,7 @@ class RepositoryAnalyzer:
 
         affected_domains = sorted(set(request_domains + file_domains))
         affected_modules = sorted({Path(item["path"]).parts[0] for item in direct_files + related_files if Path(item["path"]).parts})
+        file_risk = evaluate_file_risk([item["path"] for item in direct_files + related_files], project_risk)
 
         return {
             "version": 1,
@@ -114,6 +116,7 @@ class RepositoryAnalyzer:
                 "message_schema_changes": message_schema_changes,
                 "public_api_changes": public_api_changes,
                 "text_only_change": text_only_change,
+                "file_risk": file_risk,
                 "scheduled_jobs_affected": self._path_or_request_matches(direct_files, request, ["cron", "job", "scheduler", "定时"]),
                 "configuration_changes": "configuration" in change_types,
             },

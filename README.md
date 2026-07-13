@@ -70,6 +70,18 @@ Human reviewers can add modules, raise risk, and correct AI assumptions from CLI
 
 Low-risk menu or copy changes are routed through the lightweight path when structured intent says the change is display-only and code evidence does not contradict it. Weak guardrail signals are shown as candidates for human confirmation, but they do not set the hard minimum risk level unless supported by strong evidence.
 
+File importance is part of risk routing. Configure `file_risk` in `.ai-governance/project-risk.yaml` so similarly sized changes can route differently:
+
+```yaml
+file_risk:
+  - pattern: "app/database*.py"
+    level: high
+    reason: database connection or persistence infrastructure
+  - pattern: "frontend/src/layouts/**"
+    level: low
+    reason: navigation and display shell
+```
+
 After workflow approval, generate and approve the technical plan before implementation:
 
 ```bash

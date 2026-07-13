@@ -20,6 +20,7 @@ Required behavior:
 - Apply hard guardrails before workflow composition.
 - Keep simple menu/copy changes lightweight unless strong evidence shows real data, interface, permission, or deletion impact.
 - Treat weak-only guardrail signals as candidates for confirmation, not as hard minimum level triggers.
+- Consider configured `file_risk` when explaining risk: small edits in database/auth/scheduler/API files can require heavier workflow than similar-sized UI text edits.
 - Stop after `workflow-plan.md` until human approval is present.
 - Do not generate a technical plan before workflow approval.
 - Do not modify business code before technical-plan approval and implementation gate check.
