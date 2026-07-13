@@ -38,6 +38,25 @@ OPERATION_KEYWORDS = {
     "bulk_update": ["bulk update", "批量更新", "update all", "历史数据"],
 }
 
+DATA_OPERATION_CONTEXT = [
+    "data",
+    "record",
+    "row",
+    "table",
+    "database",
+    "sql",
+    "mapper",
+    "migration",
+    "schema",
+    "数据",
+    "记录",
+    "行",
+    "表",
+    "数据库",
+    "历史数据",
+    "存量数据",
+]
+
 SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules"}
 
 
@@ -56,8 +75,7 @@ class RepositoryAnalyzer:
         file_domains = self._domains_from_paths(direct_files, domain_keywords)
         change_types = sorted(set(self._match_keywords(request, CHANGE_TYPE_KEYWORDS) + self._change_types_from_paths(direct_files)))
         change_type_evidence = self._keyword_evidence(request, CHANGE_TYPE_KEYWORDS, "user_request")
-        operations = self._match_keywords(request, OPERATION_KEYWORDS)
-        operation_evidence = self._keyword_evidence(request, OPERATION_KEYWORDS, "user_request")
+        operations, operation_evidence = self._operation_findings(request, direct_files)
         database_changes = "database_schema" in change_types or bool({"delete", "truncate", "irreversible_migration", "bulk_update"} & set(operations))
         public_api_changes = "public_api" in change_types
         message_schema_changes = "message_schema" in change_types
@@ -82,8 +100,8 @@ class RepositoryAnalyzer:
                 "affected_domains": affected_domains,
                 "change_types": change_types,
                 "operations": operations,
-                "domain_evidence": request_domain_evidence + self._file_keyword_evidence(direct_files, domain_keywords, "affected_domain"),
-                "change_type_evidence": change_type_evidence + self._file_keyword_evidence(direct_files, CHANGE_TYPE_KEYWORDS, "change_type"),
+                "domain_evidence": request_domain_evidence + self._file_keyword_evidence(direct_files, domain_keywords, "affected_domain", request),
+                "change_type_evidence": change_type_evidence + self._file_keyword_evidence(direct_files, CHANGE_TYPE_KEYWORDS, "change_type", request),
                 "operation_evidence": operation_evidence,
                 "database_changes": database_changes,
                 "message_schema_changes": message_schema_changes,
@@ -220,13 +238,117 @@ class RepositoryAnalyzer:
                         "value": key,
                         "source": source,
                         "keyword": word,
+                        "strength": "strong",
                         "fact": f"FACT: {source} contains keyword '{word}' mapped to {key}.",
                     })
                     break
         return evidence
 
-    def _file_keyword_evidence(self, findings: list[dict[str, str]], mapping: dict[str, list[str]], source_kind: str) -> list[dict[str, str]]:
+    def _operation_findings(self, request: str, findings: list[dict[str, str]]) -> tuple[list[str], list[dict[str, str]]]:
+        operations = set()
         evidence = []
+        request_ops = self._keyword_evidence(request, OPERATION_KEYWORDS, "user_request")
+        request_has_data_context = self._has_data_operation_context(request)
+        for item in request_ops:
+            operation = item["value"]
+            if operation in {"truncate", "irreversible_migration", "bulk_update"} or request_has_data_context:
+                operations.add(operation)
+                item["fact"] = item["fact"].replace("FACT:", "FACT:", 1) + " Data/database context is present."
+                evidence.append(item)
+            else:
+                evidence.append({
+                    **item,
+                    "value": "code_or_config_removal",
+                    "strength": "weak",
+                    "fact": f"WEAK SIGNAL: user_request contains keyword '{item['keyword']}', but no data/database context was found; not treated as destructive database operation.",
+                })
+
+        for item in self._file_keyword_evidence(findings, OPERATION_KEYWORDS, "operation", request):
+            operation = item["value"]
+            path = item.get("path", "")
+            haystack = path
+            try:
+                haystack += "\n" + (self.root / path).read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                pass
+            if item.get("strength") == "strong" and self._is_database_operation_source(path, haystack) and (operation in {"truncate", "irreversible_migration", "bulk_update"} or self._has_data_operation_context(haystack)):
+                operations.add(operation)
+                evidence.append(item)
+            else:
+                reason = "not strongly related to this request" if item.get("strength") != "strong" else "no data/database mapping context was found"
+                evidence.append({
+                    **item,
+                    "value": "code_or_config_removal",
+                    "strength": "weak",
+                    "fact": f"WEAK SIGNAL: {path} contains operation keyword '{item.get('keyword')}', but {reason}; not treated as destructive database operation.",
+                })
+        return sorted(operations), evidence[:50]
+
+    def _has_data_operation_context(self, text: str) -> bool:
+        lower = text.lower()
+        return any(keyword.lower() in lower for keyword in DATA_OPERATION_CONTEXT)
+
+    def _is_database_operation_source(self, path: str, text: str) -> bool:
+        lower_path = path.lower()
+        if lower_path.startswith(("docs/", "test/", "tests/", ".ai-governance/", "plugins/")):
+            return False
+        if lower_path.endswith((".md", ".rst", ".txt")):
+            return False
+        lower = text.lower()
+        source_markers = [
+            ".sql",
+            ".prisma",
+            ".hbm.xml",
+            "schema.prisma",
+            "migration",
+            "migrations/",
+            "alembic",
+            "flyway",
+            "liquibase",
+            "mapper",
+            "dao",
+            "repository",
+            "entity",
+            "entities/",
+            "model",
+            "models/",
+            "orm",
+            "schema",
+            "database",
+            "db/",
+            "sql/",
+            "mybatis",
+            "hibernate",
+            "jpa",
+            "@entity",
+            "@table",
+            "sequelize",
+            "typeorm",
+            "sqlalchemy",
+            "django.db",
+            "models.model",
+            "active_record",
+            "activerecord",
+            "ecto.schema",
+            "entityframework",
+            "dbcontext",
+            "gorm",
+            "diesel",
+            "doctrine",
+            "mongoose",
+            "mongoengine",
+            "select ",
+            "delete from",
+            "update ",
+            "alter table",
+            "drop table",
+            "drop column",
+        ]
+        return any(marker in lower_path or marker in lower for marker in source_markers)
+
+    def _file_keyword_evidence(self, findings: list[dict[str, str]], mapping: dict[str, list[str]], source_kind: str, request: str) -> list[dict[str, str]]:
+        evidence = []
+        request_tokens = self._tokens(request)
         for finding in findings[:20]:
             path = self.root / finding["path"]
             haystack = finding["path"].lower()
@@ -234,15 +356,21 @@ class RepositoryAnalyzer:
                 haystack += "\n" + path.read_text(encoding="utf-8", errors="ignore").lower()
             except OSError:
                 pass
+            matched_request_tokens = [token for token in request_tokens if token in haystack]
             for value, words in mapping.items():
                 for word in words:
                     if word.lower() in haystack:
+                        strength = "strong" if matched_request_tokens else "weak"
+                        prefix = "FACT" if strength == "strong" else "WEAK SIGNAL"
+                        relation = f" also matches request token(s): {', '.join(matched_request_tokens[:5])}" if matched_request_tokens else " but does not match request-specific tokens"
                         evidence.append({
                             "value": value,
                             "source": "code_search",
                             "path": finding["path"],
                             "keyword": word,
-                            "fact": f"FACT: {finding['path']} contains keyword '{word}' mapped to {source_kind} {value}.",
+                            "strength": strength,
+                            "matched_request_tokens": matched_request_tokens[:10],
+                            "fact": f"{prefix}: {finding['path']} contains keyword '{word}' mapped to {source_kind} {value}{relation}.",
                         })
                         break
         return evidence[:50]

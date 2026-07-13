@@ -324,11 +324,12 @@ class HumanReviewGate:
             return ["  - none"]
         lines = []
         for detail in details:
-            lines.append(f"  - {detail['decision']}")
+            suffix = " needs_human_confirmation=true" if detail.get("needs_human_confirmation") else ""
+            lines.append(f"  - {detail['decision']} evidence_strength={detail.get('strength', 'unknown')}{suffix}")
             for match in detail.get("matches", []):
                 lines.append(f"    condition: {match.get('condition')}")
                 for fact in match.get("evidence", []):
-                    lines.append(f"    {fact}")
+                    lines.append(f"    {fact.get('text', fact)}")
         return lines
 
     def _ordered(self, modules: set[str], preferred: list[str]) -> list[str]:

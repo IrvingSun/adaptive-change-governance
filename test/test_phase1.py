@@ -74,7 +74,52 @@ class Phase1Test(unittest.TestCase):
         self.assertIn("manual_approval", rec["required_modules"])
         self.assertIn("direct_production_execution", rec["prohibited"])
         self.assertTrue(risk["triggered_guardrail_details"])
-        self.assertTrue(any("删除" in fact for detail in risk["triggered_guardrail_details"] for match in detail["matches"] for fact in match["evidence"]))
+        self.assertTrue(any("删除" in fact["text"] for detail in risk["triggered_guardrail_details"] for match in detail["matches"] for fact in match["evidence"]))
+
+    def test_code_and_config_removal_does_not_imply_destructive_database_operation(self):
+        evidence = RepositoryAnalyzer(ROOT).analyze("将IoT设备调试功能从管理系统中移除，并删除对应的代码和配置", self.project_risk)
+        risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)
+        self.assertNotIn("destructive-database-operation", risk["triggered_guardrails"])
+        self.assertNotIn("delete", evidence["code_findings"]["operations"])
+        self.assertTrue(any(item.get("value") == "code_or_config_removal" for item in evidence["code_findings"]["operation_evidence"]))
+
+    def test_related_orm_mapping_delete_triggers_destructive_database_operation(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            (temp / "app/iot_debug").mkdir(parents=True)
+            (temp / "app/iot_debug/models.py").write_text(
+                "from sqlalchemy import Column\n"
+                "class IotDebugRecord:\n"
+                "    __tablename__ = 'iot_debug_records'\n"
+                "    def delete_debug_data(self):\n"
+                "        pass\n",
+                encoding="utf-8",
+            )
+            evidence = RepositoryAnalyzer(temp).analyze("删除 IoT debug 数据", self.project_risk)
+            risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)
+            self.assertIn("destructive-database-operation", risk["triggered_guardrails"])
+            self.assertIn("delete", evidence["code_findings"]["operations"])
+        finally:
+            shutil.rmtree(temp)
+
+    def test_unrelated_orm_mapping_delete_is_weak_signal_only(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            (temp / "app/auth").mkdir(parents=True)
+            (temp / "app/auth/models.py").write_text(
+                "from sqlalchemy import Column\n"
+                "class AuthToken:\n"
+                "    __tablename__ = 'auth_tokens'\n"
+                "    def delete_token_data(self):\n"
+                "        pass\n",
+                encoding="utf-8",
+            )
+            evidence = RepositoryAnalyzer(temp).analyze("移除 IoT 调试功能", self.project_risk)
+            risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)
+            self.assertNotIn("destructive-database-operation", risk["triggered_guardrails"])
+            self.assertNotIn("delete", evidence["code_findings"]["operations"])
+        finally:
+            shutil.rmtree(temp)
 
     def test_charging_profile_distinguishes_device_data_from_device_control(self):
         data_evidence = RepositoryAnalyzer(ROOT).analyze("删除重复的设备端口状态数据。", self.charging_project_risk)
@@ -274,6 +319,45 @@ class Phase1Test(unittest.TestCase):
             self.assertIn("FACT: user_request contains keyword '删除'", review.stdout)
         finally:
             shutil.rmtree(temp)
+
+    def test_weak_file_signal_requires_human_confirmation(self):
+        evidence = {
+            "version": 1,
+            "request": {"original": "移除 IoT 调试功能", "normalized_intent": "移除 IoT 调试功能", "acceptance_criteria": []},
+            "repository": {"branch": "main", "commit": "abc", "dirty": False},
+            "code_findings": {
+                "direct_files": [{"path": "app/api/auth.py", "reason": "WEAK SIGNAL: generic API file"}],
+                "related_files": [],
+                "affected_modules": ["app"],
+                "affected_domains": [],
+                "change_types": ["public_api"],
+                "operations": [],
+                "domain_evidence": [],
+                "change_type_evidence": [{
+                    "value": "public_api",
+                    "source": "code_search",
+                    "path": "app/api/auth.py",
+                    "keyword": "api",
+                    "strength": "weak",
+                    "fact": "WEAK SIGNAL: app/api/auth.py contains keyword 'api' mapped to change_type public_api but does not match request-specific tokens.",
+                }],
+                "operation_evidence": [],
+                "database_changes": False,
+                "message_schema_changes": False,
+                "public_api_changes": True,
+                "scheduled_jobs_affected": False,
+                "configuration_changes": False,
+            },
+            "dependency_findings": {"upstream": [], "downstream": [], "external_dependencies": []},
+            "test_findings": {"existing_tests": [], "coverage_confidence": "low", "missing_test_areas": []},
+            "runtime_findings": {"production_usage": "unknown", "traffic_level": "unknown", "observability": "low", "rollback_capability": "low"},
+            "unknowns": ["UNKNOWN: weak public API signal requires human confirmation"],
+            "evidence_sources": ["code_search", "guardrails"],
+        }
+        risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)
+        public_detail = next(item for item in risk["triggered_guardrail_details"] if item["id"] == "public-interface-change")
+        self.assertEqual("weak", public_detail["strength"])
+        self.assertTrue(public_detail["needs_human_confirmation"])
 
     def test_human_review_cannot_remove_hard_guardrail_module(self):
         evidence = RepositoryAnalyzer(ROOT).analyze("调整退款金额保留两位小数的计算方式。", self.project_risk)

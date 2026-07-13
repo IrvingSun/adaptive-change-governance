@@ -74,12 +74,15 @@ class RiskEvaluator:
                             "evidence": self._evidence_for_condition(evidence, key, value),
                         })
             if matches:
+                strength = self._match_strength(matches)
                 details.append({
                     "id": guardrail["id"],
                     "matches": matches,
+                    "strength": strength,
+                    "needs_human_confirmation": strength == "weak",
                     "require": guardrail.get("require", []),
                     "prohibit": guardrail.get("prohibit", []),
-                    "decision": f"DECISION: triggered {guardrail['id']} because at least one hard-guardrail condition matched.",
+                    "decision": self._guardrail_decision(guardrail["id"], strength),
                 })
         return details
 
@@ -94,7 +97,7 @@ class RiskEvaluator:
     def _condition_matches(self, condition: dict[str, str], facts: dict[str, set[str]]) -> bool:
         return any(value in facts.get(key, set()) for key, value in condition.items())
 
-    def _evidence_for_condition(self, evidence: dict[str, Any], key: str, value: str) -> list[str]:
+    def _evidence_for_condition(self, evidence: dict[str, Any], key: str, value: str) -> list[dict[str, str]]:
         code = evidence.get("code_findings", {})
         evidence_key = {
             "affected_domain": "domain_evidence",
@@ -105,10 +108,25 @@ class RiskEvaluator:
         if evidence_key:
             for item in code.get(evidence_key, []):
                 if item.get("value") == value:
-                    facts.append(item.get("fact", f"FACT: {key}={value}."))
+                    facts.append({
+                        "strength": item.get("strength", "strong"),
+                        "text": item.get("fact", f"FACT: {key}={value}."),
+                    })
         if not facts:
-            facts.append(f"FACT: evidence-pack.yaml code_findings contains {key}={value}.")
+            facts.append({
+                "strength": "weak",
+                "text": f"WEAK SIGNAL: evidence-pack.yaml code_findings contains {key}={value}, but no direct keyword evidence was recorded.",
+            })
         return facts[:5]
+
+    def _match_strength(self, matches: list[dict[str, Any]]) -> str:
+        strengths = [item.get("strength", "weak") for match in matches for item in match.get("evidence", [])]
+        return "strong" if "strong" in strengths else "weak"
+
+    def _guardrail_decision(self, guardrail_id: str, strength: str) -> str:
+        if strength == "strong":
+            return f"DECISION: triggered {guardrail_id} because strong evidence matched at least one hard-guardrail condition."
+        return f"DECISION: triggered {guardrail_id} from weak signals; keep guardrail active and require human confirmation."
 
     def _score_dimensions(self, evidence: dict[str, Any], triggered: list[dict[str, Any]]) -> dict[str, int]:
         business = self.project_risk.get("business_risk", {})
@@ -212,7 +230,7 @@ class RiskEvaluator:
             judgments.append("FACT: hard guardrails matched: " + ", ".join(item["id"] for item in triggered) + ".")
             for detail in self._triggered_guardrail_details(evidence):
                 for match in detail["matches"]:
-                    judgments.extend(match["evidence"][:2])
+                    judgments.extend(item["text"] for item in match["evidence"][:2])
                 judgments.append(detail["decision"])
             judgments.append("DECISION: final level cannot be lower than hard guardrail minimum.")
         if evidence.get("unknowns"):
