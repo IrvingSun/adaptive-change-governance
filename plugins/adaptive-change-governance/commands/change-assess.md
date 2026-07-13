@@ -14,14 +14,18 @@ change-assess "$ARGUMENTS"
 
 After the command finishes:
 
-1. Open the generated `review.md`.
-2. Ask the user to edit `human-review.yaml` if they want to approve, reject, request changes, request reassessment, raise risk, or add workflow modules.
+1. Run `change-assess --review-workflow <run_id>` and show the user the risk, guardrails, required modules, optional modules, unknowns, and available commands.
+2. Ask the user which decision or module changes they want.
 3. Do not generate a technical plan until workflow approval has succeeded.
-4. To approve after the user edits `human-review.yaml`, run:
+4. To approve with command-line changes, run:
 
 ```bash
-change-assess --approve-workflow <run_id>
+change-assess --approve-workflow <run_id> --reviewer <name>
+change-assess --approve-workflow <run_id> --reviewer <name> --add-required threat_analysis
+change-assess --approve-workflow <run_id> --reviewer <name> --raise-level L4 --reason "reason"
 ```
+
+Use `change-assess --review-decision <run_id> --decision reassess --comment "reason"` when the user requests reassessment instead of approval.
 
 Hard constraints:
 

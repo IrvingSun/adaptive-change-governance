@@ -31,8 +31,10 @@ bin/change-assess "<需求描述>" --profile charging-platform
 
 ```bash
 bin/change-assess "<需求描述>"
-# 编辑 run 目录中的 human-review.yaml
-bin/change-assess --approve-workflow <run_id>
+bin/change-assess --review-workflow <run_id>
+bin/change-assess --approve-workflow <run_id> --reviewer <name>
+bin/change-assess --approve-workflow <run_id> --reviewer <name> --add-required threat_analysis
+bin/change-assess --review-decision <run_id> --decision reassess --comment "reason"
 ```
 
 `human-review.yaml` 支持：

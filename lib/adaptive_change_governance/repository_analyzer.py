@@ -52,9 +52,12 @@ class RepositoryAnalyzer:
         tests = self._find_tests(files)
         git_info = self._git_info()
         request_domains = self._match_keywords(request, domain_keywords)
+        request_domain_evidence = self._keyword_evidence(request, domain_keywords, "user_request")
         file_domains = self._domains_from_paths(direct_files, domain_keywords)
         change_types = sorted(set(self._match_keywords(request, CHANGE_TYPE_KEYWORDS) + self._change_types_from_paths(direct_files)))
+        change_type_evidence = self._keyword_evidence(request, CHANGE_TYPE_KEYWORDS, "user_request")
         operations = self._match_keywords(request, OPERATION_KEYWORDS)
+        operation_evidence = self._keyword_evidence(request, OPERATION_KEYWORDS, "user_request")
         database_changes = "database_schema" in change_types or bool({"delete", "truncate", "irreversible_migration", "bulk_update"} & set(operations))
         public_api_changes = "public_api" in change_types
         message_schema_changes = "message_schema" in change_types
@@ -79,6 +82,9 @@ class RepositoryAnalyzer:
                 "affected_domains": affected_domains,
                 "change_types": change_types,
                 "operations": operations,
+                "domain_evidence": request_domain_evidence + self._file_keyword_evidence(direct_files, domain_keywords, "affected_domain"),
+                "change_type_evidence": change_type_evidence + self._file_keyword_evidence(direct_files, CHANGE_TYPE_KEYWORDS, "change_type"),
+                "operation_evidence": operation_evidence,
                 "database_changes": database_changes,
                 "message_schema_changes": message_schema_changes,
                 "public_api_changes": public_api_changes,
@@ -203,6 +209,43 @@ class RepositoryAnalyzer:
     def _match_keywords(self, text: str, mapping: dict[str, list[str]]) -> list[str]:
         lower = text.lower()
         return sorted([key for key, words in mapping.items() if any(word.lower() in lower for word in words)])
+
+    def _keyword_evidence(self, text: str, mapping: dict[str, list[str]], source: str) -> list[dict[str, str]]:
+        lower = text.lower()
+        evidence = []
+        for key, words in mapping.items():
+            for word in words:
+                if word.lower() in lower:
+                    evidence.append({
+                        "value": key,
+                        "source": source,
+                        "keyword": word,
+                        "fact": f"FACT: {source} contains keyword '{word}' mapped to {key}.",
+                    })
+                    break
+        return evidence
+
+    def _file_keyword_evidence(self, findings: list[dict[str, str]], mapping: dict[str, list[str]], source_kind: str) -> list[dict[str, str]]:
+        evidence = []
+        for finding in findings[:20]:
+            path = self.root / finding["path"]
+            haystack = finding["path"].lower()
+            try:
+                haystack += "\n" + path.read_text(encoding="utf-8", errors="ignore").lower()
+            except OSError:
+                pass
+            for value, words in mapping.items():
+                for word in words:
+                    if word.lower() in haystack:
+                        evidence.append({
+                            "value": value,
+                            "source": "code_search",
+                            "path": finding["path"],
+                            "keyword": word,
+                            "fact": f"FACT: {finding['path']} contains keyword '{word}' mapped to {source_kind} {value}.",
+                        })
+                        break
+        return evidence[:50]
 
     def _merged_domain_keywords(self, project_risk: dict[str, Any]) -> dict[str, list[str]]:
         merged = {key: list(values) for key, values in DOMAIN_KEYWORDS.items()}

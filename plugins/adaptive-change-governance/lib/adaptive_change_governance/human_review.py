@@ -112,6 +112,111 @@ class HumanReviewGate:
         (run_dir / ".workflow-approved").write_text(approved["approved_at"] + "\n", encoding="utf-8")
         return approved
 
+    def review_summary(self, run_dir: Path) -> str:
+        evidence = load_yaml(run_dir / "evidence-pack.yaml")
+        risk = load_yaml(run_dir / "risk-assessment.yaml")
+        workflow = load_yaml(run_dir / "workflow-recommendation.yaml")
+        rec = workflow["workflow_recommendation"]
+        lines = [
+            "Workflow Review",
+            "",
+            f"Run: {run_dir.name}",
+            f"Request: {evidence['request']['original']}",
+            f"Final level: {rec['final_level']}",
+            f"Triggered guardrails: {rec.get('triggered_guardrails', [])}",
+            f"Prohibited actions: {rec.get('prohibited', [])}",
+            "",
+            "Guardrail evidence:",
+        ]
+        lines.extend(self._guardrail_evidence_lines(risk))
+        lines.extend([
+            "",
+            "Recommended execution steps:",
+        ])
+        lines.extend(self._step_lines(rec.get("required_modules", []), risk))
+        lines.extend([
+            "",
+            "Optional steps:",
+        ])
+        optional = rec.get("optional_modules", [])
+        lines.extend(self._step_lines(optional, risk) if optional else ["  - none"])
+        lines.extend([
+            "",
+            "Unknowns:",
+        ])
+        lines.extend(f"  - {item.replace('UNKNOWN: ', '', 1)}" for item in evidence.get("unknowns", []))
+        lines.extend([
+            "",
+            "Allowed user changes:",
+            "  - approve / reject / request_changes / reassess",
+            "  - add required modules",
+            "  - add optional modules",
+            "  - raise final level",
+            "  - add user facts or corrections",
+            "",
+            "Commands:",
+            f"  change-assess --approve-workflow {run_dir.name} --reviewer <name>",
+            f"  change-assess --approve-workflow {run_dir.name} --reviewer <name> --add-required threat_analysis --add-required security_regression_test",
+            f"  change-assess --approve-workflow {run_dir.name} --reviewer <name> --raise-level L4 --reason \"reason\"",
+            f"  change-assess --review-decision {run_dir.name} --decision reassess --comment \"reason\"",
+            "",
+            "Guardrail constraints:",
+            "  - cannot lower the final level",
+            "  - cannot remove hard-guardrail or final-level required modules",
+            "  - technical plan remains blocked until workflow approval succeeds",
+        ])
+        return "\n".join(lines) + "\n"
+
+    def approved_summary(self, approved: dict[str, Any]) -> str:
+        rec = approved["workflow_recommendation"]
+        lines = [
+            f"Workflow approved: {approved.get('approval', {}).get('reviewer') or 'unknown reviewer'}",
+            f"Approved final level: {approved['risk']['approved_final_level']}",
+            "",
+            "Approved execution steps:",
+        ]
+        lines.extend(self._step_lines(rec.get("required_modules", []), {"required_by_guardrails": []}))
+        lines.extend([
+            "",
+            "Next gate: technical_plan_proposal",
+        ])
+        return "\n".join(lines) + "\n"
+
+    def update_review(
+        self,
+        run_dir: Path,
+        decision: str | None = None,
+        reviewer: str | None = None,
+        raise_level: str | None = None,
+        reason: str | None = None,
+        add_required: list[str] | None = None,
+        add_optional: list[str] | None = None,
+        user_fact: list[str] | None = None,
+        correction: list[str] | None = None,
+        comment: list[str] | None = None,
+    ) -> dict[str, Any]:
+        review = load_yaml(run_dir / "human-review.yaml")
+        self._validate_review_shape(review)
+        if decision:
+            review["decision"] = decision
+        if reviewer:
+            review.setdefault("approval", {})["reviewer"] = reviewer
+        if raise_level:
+            review.setdefault("risk_override", {})["final_level"] = raise_level
+        if reason:
+            review.setdefault("risk_override", {})["reason"] = reason
+        changes = review.setdefault("module_changes", {})
+        self._extend_unique(changes.setdefault("add_required", []), add_required or [])
+        self._extend_unique(changes.setdefault("add_optional", []), add_optional or [])
+        self._extend_unique(review.setdefault("user_facts", []), user_fact or [])
+        self._extend_unique(review.setdefault("user_corrections", []), correction or [])
+        self._extend_unique(review.setdefault("comments", []), comment or [])
+        if decision == "approve":
+            review.setdefault("approval", {})["confirmed_at"] = datetime.now(timezone.utc).isoformat()
+        self._validate_review_shape(review)
+        dump_yaml(run_dir / "human-review.yaml", review)
+        return review
+
     def _default_review(self, evidence: dict[str, Any], risk: dict[str, Any], workflow: dict[str, Any]) -> dict[str, Any]:
         rec = workflow["workflow_recommendation"]
         return {
@@ -165,9 +270,14 @@ class HumanReviewGate:
             "bin/change-assess --approve-workflow <run_id>",
             "```",
             "",
-            "## Current Required Modules",
+            "## Recommended Execution Steps",
         ]
-        lines.extend(f"- DECISION: {module}" for module in rec.get("required_modules", []))
+        lines.extend(f"- DECISION: {line.strip()}" for line in self._step_lines(rec.get("required_modules", []), risk))
+        lines.extend([
+            "",
+            "## Guardrail Evidence",
+        ])
+        lines.extend(f"- {line.strip()}" for line in self._guardrail_evidence_lines(risk))
         lines.extend([
             "",
             "## Current Unknowns",
@@ -186,6 +296,36 @@ class HumanReviewGate:
         for key in ("add_required", "remove_required", "add_optional"):
             if not isinstance(changes.get(key, []), list):
                 raise ReviewError(f"module_changes.{key} must be a list")
+
+    def _extend_unique(self, target: list[str], values: list[str]) -> None:
+        for value in values:
+            if value and value not in target:
+                target.append(value)
+
+    def _step_lines(self, modules: list[str], risk: dict[str, Any]) -> list[str]:
+        hard_required = set(risk.get("required_by_guardrails", []))
+        lines = []
+        for index, module in enumerate(modules, start=1):
+            meta = self.workflow_modules.get("modules", {}).get(module, {})
+            reason = "hard guardrail" if module in hard_required else "risk workflow"
+            lines.append(
+                f"  {index}. {meta.get('description', module)} "
+                f"({module}) -> output: {meta.get('output', 'unknown')}; required by: {reason}"
+            )
+        return lines
+
+    def _guardrail_evidence_lines(self, risk: dict[str, Any]) -> list[str]:
+        details = risk.get("triggered_guardrail_details", [])
+        if not details:
+            return ["  - none"]
+        lines = []
+        for detail in details:
+            lines.append(f"  - {detail['decision']}")
+            for match in detail.get("matches", []):
+                lines.append(f"    condition: {match.get('condition')}")
+                for fact in match.get("evidence", []):
+                    lines.append(f"    {fact}")
+        return lines
 
     def _ordered(self, modules: set[str], preferred: list[str]) -> list[str]:
         result = [module for module in preferred if module in modules]

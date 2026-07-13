@@ -72,6 +72,8 @@ class Phase1Test(unittest.TestCase):
         self.assertIn("dry_run", rec["required_modules"])
         self.assertIn("manual_approval", rec["required_modules"])
         self.assertIn("direct_production_execution", rec["prohibited"])
+        self.assertTrue(risk["triggered_guardrail_details"])
+        self.assertTrue(any("删除" in fact for detail in risk["triggered_guardrail_details"] for match in detail["matches"] for fact in match["evidence"]))
 
     def test_charging_profile_distinguishes_device_data_from_device_control(self):
         data_evidence = RepositoryAnalyzer(ROOT).analyze("删除重复的设备端口状态数据。", self.charging_project_risk)
@@ -152,7 +154,16 @@ class Phase1Test(unittest.TestCase):
 
                 yaml.safe_dump(review, handle, sort_keys=False, allow_unicode=True)
             approval = subprocess.run(
-                [sys.executable, str(temp / "bin/change-assess"), "--approve-workflow", run_dir.name],
+                [
+                    sys.executable,
+                    str(temp / "bin/change-assess"),
+                    "--approve-workflow",
+                    run_dir.name,
+                    "--reviewer",
+                    "cli-reviewer",
+                    "--add-required",
+                    "threat_analysis",
+                ],
                 cwd=temp,
                 env=env,
                 check=False,
@@ -162,9 +173,83 @@ class Phase1Test(unittest.TestCase):
             self.assertEqual(approval.returncode, 0, approval.stderr + approval.stdout)
             approved = load_yaml(run_dir / "approved-workflow.yaml")
             self.assertIn("requirement_confirmation", approved["workflow_recommendation"]["required_modules"])
+            self.assertIn("threat_analysis", approved["workflow_recommendation"]["required_modules"])
+            self.assertEqual("cli-reviewer", approved["approval"]["reviewer"])
             self.assertTrue((run_dir / "approved-workflow-plan.md").exists())
             self.assertTrue((run_dir / ".workflow-approved").exists())
             self.assertFalse((run_dir / "technical-plan.md").exists())
+        finally:
+            shutil.rmtree(temp)
+
+    def test_cli_review_workflow_lists_user_actions(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            shutil.copytree(ROOT / ".ai-governance", temp / ".ai-governance", ignore=shutil.ignore_patterns("runs"))
+            shutil.copytree(ROOT / "lib", temp / "lib")
+            shutil.copytree(ROOT / "bin", temp / "bin")
+            subprocess.run(["git", "init"], cwd=temp, check=True, capture_output=True, text=True)
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(temp / "lib")
+            result = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "修改后台订单页面上的提示文案。"],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            run_dir = next((temp / ".ai-governance/runs").iterdir())
+            review = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--review-workflow", run_dir.name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(review.returncode, 0, review.stderr + review.stdout)
+            self.assertIn("Allowed user changes", review.stdout)
+            self.assertIn("Guardrail evidence", review.stdout)
+            self.assertIn("Recommended execution steps", review.stdout)
+            self.assertIn("扫描当前代码", review.stdout)
+            self.assertIn("--add-required", review.stdout)
+            self.assertIn("--review-decision", review.stdout)
+            self.assertNotIn("Required modules:", review.stdout)
+        finally:
+            shutil.rmtree(temp)
+
+    def test_cli_review_workflow_shows_guardrail_evidence(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            shutil.copytree(ROOT / ".ai-governance", temp / ".ai-governance", ignore=shutil.ignore_patterns("runs"))
+            shutil.copytree(ROOT / "lib", temp / "lib")
+            shutil.copytree(ROOT / "bin", temp / "bin")
+            subprocess.run(["git", "init"], cwd=temp, check=True, capture_output=True, text=True)
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(temp / "lib")
+            result = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "删除重复配置数据。"],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            run_dir = next((temp / ".ai-governance/runs").iterdir())
+            review = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--review-workflow", run_dir.name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(review.returncode, 0, review.stderr + review.stdout)
+            self.assertIn("Guardrail evidence", review.stdout)
+            self.assertIn("DECISION: triggered destructive-database-operation", review.stdout)
+            self.assertIn("FACT: user_request contains keyword '删除'", review.stdout)
         finally:
             shutil.rmtree(temp)
 

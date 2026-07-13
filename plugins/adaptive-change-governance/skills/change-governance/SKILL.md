@@ -23,3 +23,11 @@ For workflow approval after the user edits `human-review.yaml`:
 ```bash
 change-assess --approve-workflow <run_id>
 ```
+
+Prefer command-line review over asking the user to edit YAML:
+
+```bash
+change-assess --review-workflow <run_id>
+change-assess --approve-workflow <run_id> --reviewer <name> --add-required threat_analysis
+change-assess --review-decision <run_id> --decision reassess --comment "reason"
+```

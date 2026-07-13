@@ -24,7 +24,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--profile", help="Use .ai-governance/profiles/<profile>/ overrides for project risk and guardrails")
     parser.add_argument("--output", default=".ai-governance/runs")
     parser.add_argument("--run-id")
+    parser.add_argument("--review-workflow", help="Print workflow review options for an existing run id or run directory")
     parser.add_argument("--approve-workflow", help="Approve workflow for an existing run id or run directory")
+    parser.add_argument("--review-decision", help="Set review decision for an existing run id or run directory")
+    parser.add_argument("--decision", choices=["approve", "reject", "request_changes", "reassess"])
+    parser.add_argument("--reviewer")
+    parser.add_argument("--raise-level", choices=["L1", "L2", "L3", "L4"])
+    parser.add_argument("--reason")
+    parser.add_argument("--add-required", action="append", default=[])
+    parser.add_argument("--add-optional", action="append", default=[])
+    parser.add_argument("--user-fact", action="append", default=[])
+    parser.add_argument("--correction", action="append", default=[])
+    parser.add_argument("--comment", action="append", default=[])
     args = parser.parse_args(argv)
 
     root = Path.cwd()
@@ -45,8 +56,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {exc}")
         return 2
 
+    if args.review_workflow:
+        return _review_workflow(root, Path(args.output), args.review_workflow, workflow_modules)
+
+    if args.review_decision:
+        return _review_decision(root, Path(args.output), args.review_decision, args, workflow_modules)
+
     if args.approve_workflow:
-        return _approve_workflow(root, Path(args.output), args.approve_workflow, project_risk, workflow_modules)
+        return _approve_workflow(root, Path(args.output), args.approve_workflow, args, project_risk, workflow_modules)
 
     if args.mode != "assess":
         return _guarded_mode(args.mode)
@@ -80,20 +97,72 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _approve_workflow(root: Path, output_root: Path, run_id: str, project_risk: dict, workflow_modules: dict) -> int:
+def _review_workflow(root: Path, output_root: Path, run_id: str, workflow_modules: dict) -> int:
     run_dir = _resolve_run_dir(root, output_root, run_id)
     if not run_dir.exists():
         print(f"ERROR: run not found: {run_id}")
         return 2
     try:
-        approved = HumanReviewGate(workflow_modules).approve_workflow(run_dir, project_risk)
+        print(HumanReviewGate(workflow_modules).review_summary(run_dir), end="")
+    except (ConfigError, ReviewError) as exc:
+        print(f"ERROR: {exc}")
+        return 2
+    return 0
+
+
+def _review_decision(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, workflow_modules: dict) -> int:
+    run_dir = _resolve_run_dir(root, output_root, run_id)
+    if not run_dir.exists():
+        print(f"ERROR: run not found: {run_id}")
+        return 2
+    try:
+        review = HumanReviewGate(workflow_modules).update_review(
+            run_dir,
+            decision=args.decision,
+            reviewer=args.reviewer,
+            raise_level=args.raise_level,
+            reason=args.reason,
+            add_required=args.add_required,
+            add_optional=args.add_optional,
+            user_fact=args.user_fact,
+            correction=args.correction,
+            comment=args.comment,
+        )
+    except (ConfigError, ReviewError) as exc:
+        print(f"BLOCKED: {exc}")
+        return 3
+    print(f"Review updated: {run_dir}")
+    print(f"Decision: {review['decision']}")
+    print(f"Added required modules: {review.get('module_changes', {}).get('add_required', [])}")
+    print("Run --review-workflow to inspect, or --approve-workflow to approve when ready.")
+    return 0
+
+
+def _approve_workflow(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, project_risk: dict, workflow_modules: dict) -> int:
+    run_dir = _resolve_run_dir(root, output_root, run_id)
+    if not run_dir.exists():
+        print(f"ERROR: run not found: {run_id}")
+        return 2
+    try:
+        gate = HumanReviewGate(workflow_modules)
+        gate.update_review(
+            run_dir,
+            decision="approve",
+            reviewer=args.reviewer,
+            raise_level=args.raise_level,
+            reason=args.reason,
+            add_required=args.add_required,
+            add_optional=args.add_optional,
+            user_fact=args.user_fact,
+            correction=args.correction,
+            comment=args.comment,
+        )
+        approved = gate.approve_workflow(run_dir, project_risk)
     except (ConfigError, ReviewError) as exc:
         print(f"BLOCKED: {exc}")
         return 3
     print(f"Workflow approved: {run_dir}")
-    print(f"Approved final level: {approved['risk']['approved_final_level']}")
-    print(f"Required modules: {approved['workflow_recommendation']['required_modules']}")
-    print("Next gate: technical_plan_proposal")
+    print(gate.approved_summary(approved), end="")
     return 0
 
 

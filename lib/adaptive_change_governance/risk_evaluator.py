@@ -28,6 +28,7 @@ class RiskEvaluator:
 
     def evaluate(self, evidence: dict[str, Any]) -> dict[str, Any]:
         triggered = self._triggered_guardrails(evidence)
+        triggered_details = self._triggered_guardrail_details(evidence)
         dimensions = self._score_dimensions(evidence, triggered)
         weighted_score = round(sum(dimensions[key] * weight for key, weight in WEIGHTS.items()), 2)
         calculated_level = self._level_from_score(weighted_score)
@@ -45,6 +46,7 @@ class RiskEvaluator:
             "guardrail_minimum_level": guardrail_minimum,
             "final_level": final_level,
             "triggered_guardrails": [item["id"] for item in triggered],
+            "triggered_guardrail_details": triggered_details,
             "required_by_guardrails": required_by_guardrails,
             "prohibited": prohibited,
             "judgments": self._judgments(evidence, triggered, dimensions, calculated_level, final_level),
@@ -59,6 +61,28 @@ class RiskEvaluator:
                 triggered.append(guardrail)
         return triggered
 
+    def _triggered_guardrail_details(self, evidence: dict[str, Any]) -> list[dict[str, Any]]:
+        facts = self._fact_index(evidence)
+        details = []
+        for guardrail in self.guardrails.get("hard_guardrails", []):
+            matches = []
+            for condition in guardrail.get("when", {}).get("any", []):
+                for key, value in condition.items():
+                    if value in facts.get(key, set()):
+                        matches.append({
+                            "condition": {key: value},
+                            "evidence": self._evidence_for_condition(evidence, key, value),
+                        })
+            if matches:
+                details.append({
+                    "id": guardrail["id"],
+                    "matches": matches,
+                    "require": guardrail.get("require", []),
+                    "prohibit": guardrail.get("prohibit", []),
+                    "decision": f"DECISION: triggered {guardrail['id']} because at least one hard-guardrail condition matched.",
+                })
+        return details
+
     def _fact_index(self, evidence: dict[str, Any]) -> dict[str, set[str]]:
         code = evidence.get("code_findings", {})
         return {
@@ -69,6 +93,22 @@ class RiskEvaluator:
 
     def _condition_matches(self, condition: dict[str, str], facts: dict[str, set[str]]) -> bool:
         return any(value in facts.get(key, set()) for key, value in condition.items())
+
+    def _evidence_for_condition(self, evidence: dict[str, Any], key: str, value: str) -> list[str]:
+        code = evidence.get("code_findings", {})
+        evidence_key = {
+            "affected_domain": "domain_evidence",
+            "change_type": "change_type_evidence",
+            "operation": "operation_evidence",
+        }.get(key)
+        facts = []
+        if evidence_key:
+            for item in code.get(evidence_key, []):
+                if item.get("value") == value:
+                    facts.append(item.get("fact", f"FACT: {key}={value}."))
+        if not facts:
+            facts.append(f"FACT: evidence-pack.yaml code_findings contains {key}={value}.")
+        return facts[:5]
 
     def _score_dimensions(self, evidence: dict[str, Any], triggered: list[dict[str, Any]]) -> dict[str, int]:
         business = self.project_risk.get("business_risk", {})
@@ -170,6 +210,10 @@ class RiskEvaluator:
         ]
         if triggered:
             judgments.append("FACT: hard guardrails matched: " + ", ".join(item["id"] for item in triggered) + ".")
+            for detail in self._triggered_guardrail_details(evidence):
+                for match in detail["matches"]:
+                    judgments.extend(match["evidence"][:2])
+                judgments.append(detail["decision"])
             judgments.append("DECISION: final level cannot be lower than hard guardrail minimum.")
         if evidence.get("unknowns"):
             normalized_unknowns = [item.replace("UNKNOWN: ", "", 1) for item in evidence["unknowns"][:3]]
