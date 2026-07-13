@@ -20,9 +20,9 @@ After the command finishes:
 4. To approve with command-line changes, run:
 
 ```bash
-change-assess --approve-workflow <run_id> --reviewer <name>
-change-assess --approve-workflow <run_id> --reviewer <name> --add-required threat_analysis
-change-assess --approve-workflow <run_id> --reviewer <name> --raise-level L4 --reason "reason"
+change-assess --approve-workflow <run_id>
+change-assess --approve-workflow <run_id> --add-required threat_analysis
+change-assess --approve-workflow <run_id> --raise-level L4 --reason "reason"
 ```
 
 Use `change-assess --review-decision <run_id> --decision reassess --comment "reason"` when the user requests reassessment instead of approval.

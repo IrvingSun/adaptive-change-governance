@@ -23,6 +23,6 @@ Use command-line review and approval. Do not ask users to manually edit `human-r
 
 ```bash
 change-assess --review-workflow <run_id>
-change-assess --approve-workflow <run_id> --reviewer <name> --add-required threat_analysis
+change-assess --approve-workflow <run_id> --add-required threat_analysis
 change-assess --review-decision <run_id> --decision reassess --comment "reason"
 ```

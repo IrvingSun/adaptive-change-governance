@@ -155,9 +155,9 @@ class HumanReviewGate:
             "  - add user facts or corrections",
             "",
             "Commands:",
-            f"  change-assess --approve-workflow {run_dir.name} --reviewer <name>",
-            f"  change-assess --approve-workflow {run_dir.name} --reviewer <name> --add-required threat_analysis --add-required security_regression_test",
-            f"  change-assess --approve-workflow {run_dir.name} --reviewer <name> --raise-level L4 --reason \"reason\"",
+            f"  change-assess --approve-workflow {run_dir.name}",
+            f"  change-assess --approve-workflow {run_dir.name} --add-required threat_analysis --add-required security_regression_test",
+            f"  change-assess --approve-workflow {run_dir.name} --raise-level L4 --reason \"reason\"",
             f"  change-assess --review-decision {run_dir.name} --decision reassess --comment \"reason\"",
             "",
             "Guardrail constraints:",
@@ -170,7 +170,7 @@ class HumanReviewGate:
     def approved_summary(self, approved: dict[str, Any]) -> str:
         rec = approved["workflow_recommendation"]
         lines = [
-            f"Workflow approved: {approved.get('approval', {}).get('reviewer') or 'unknown reviewer'}",
+            f"Workflow approved: {approved.get('approval', {}).get('reviewer') or 'human_cli_approval'}",
             f"Approved final level: {approved['risk']['approved_final_level']}",
             "",
             "Approved execution steps:",
@@ -212,7 +212,11 @@ class HumanReviewGate:
         self._extend_unique(review.setdefault("user_corrections", []), correction or [])
         self._extend_unique(review.setdefault("comments", []), comment or [])
         if decision == "approve":
-            review.setdefault("approval", {})["confirmed_at"] = datetime.now(timezone.utc).isoformat()
+            approval = review.setdefault("approval", {})
+            approval.setdefault("reviewer", "")
+            if not approval["reviewer"]:
+                approval["reviewer"] = "human_cli_approval"
+            approval["confirmed_at"] = datetime.now(timezone.utc).isoformat()
         self._validate_review_shape(review)
         dump_yaml(run_dir / "human-review.yaml", review)
         return review
@@ -262,7 +266,7 @@ class HumanReviewGate:
             "",
             "## Review Commands",
             "- DECISION: Use `change-assess --review-workflow <run_id>` to inspect risk, evidence, and recommended execution steps.",
-            "- DECISION: Use `change-assess --approve-workflow <run_id> --reviewer <name>` to approve.",
+            "- DECISION: Use `change-assess --approve-workflow <run_id>` to approve.",
             "- DECISION: Use `--add-required`, `--add-optional`, `--raise-level`, `--user-fact`, or `--correction` to adjust the workflow from CLI flags.",
             "- DECISION: Use `change-assess --review-decision <run_id> --decision reassess --comment \"reason\"` to request reassessment.",
             "- DECISION: Do not ask users to manually edit `human-review.yaml`; it is retained as an audit file.",
@@ -270,8 +274,8 @@ class HumanReviewGate:
             "",
             "## Example Approval Commands",
             "```bash",
-            "change-assess --approve-workflow <run_id> --reviewer <name>",
-            "change-assess --approve-workflow <run_id> --reviewer <name> --add-required threat_analysis",
+            "change-assess --approve-workflow <run_id>",
+            "change-assess --approve-workflow <run_id> --add-required threat_analysis",
             "```",
             "",
             "## Recommended Execution Steps",

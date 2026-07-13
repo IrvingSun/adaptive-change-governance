@@ -239,7 +239,6 @@ class Phase1Test(unittest.TestCase):
             review = load_yaml(run_dir / "human-review.yaml")
             review["decision"] = "approve"
             review["module_changes"]["add_required"] = ["requirement_confirmation"]
-            review["approval"]["reviewer"] = "test-reviewer"
             with (run_dir / "human-review.yaml").open("w", encoding="utf-8") as handle:
                 import yaml
 
@@ -250,8 +249,6 @@ class Phase1Test(unittest.TestCase):
                     str(temp / "bin/change-assess"),
                     "--approve-workflow",
                     run_dir.name,
-                    "--reviewer",
-                    "cli-reviewer",
                     "--add-required",
                     "threat_analysis",
                 ],
@@ -265,7 +262,7 @@ class Phase1Test(unittest.TestCase):
             approved = load_yaml(run_dir / "approved-workflow.yaml")
             self.assertIn("requirement_confirmation", approved["workflow_recommendation"]["required_modules"])
             self.assertIn("threat_analysis", approved["workflow_recommendation"]["required_modules"])
-            self.assertEqual("cli-reviewer", approved["approval"]["reviewer"])
+            self.assertEqual("human_cli_approval", approved["approval"]["reviewer"])
             self.assertTrue((run_dir / "approved-workflow-plan.md").exists())
             self.assertTrue((run_dir / ".workflow-approved").exists())
             self.assertFalse((run_dir / "technical-plan.md").exists())
