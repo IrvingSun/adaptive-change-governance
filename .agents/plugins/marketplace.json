@@ -1,0 +1,20 @@
+{
+  "name": "adaptive-governance",
+  "interface": {
+    "displayName": "Adaptive Governance"
+  },
+  "plugins": [
+    {
+      "name": "adaptive-change-governance",
+      "source": {
+        "source": "local",
+        "path": "./plugins/adaptive-change-governance"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

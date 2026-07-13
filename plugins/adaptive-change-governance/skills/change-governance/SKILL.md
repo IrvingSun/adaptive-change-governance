@@ -1,4 +1,5 @@
 ---
+name: change-governance
 description: Use Adaptive Change Governance before technical planning or implementation. Generate evidence, risk assessment, and workflow plan first; wait for human approval before design or execution.
 ---
 

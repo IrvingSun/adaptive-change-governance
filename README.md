@@ -69,3 +69,26 @@ After install, use:
 ```
 
 The plugin contributes a `change-assess` executable to Claude Code's Bash PATH. It requires `PyYAML` in the Python environment used by `python3`.
+
+## Codex plugin
+
+This repository also includes a Codex marketplace and plugin package:
+
+- Marketplace: `.agents/plugins/marketplace.json`
+- Plugin: `plugins/adaptive-change-governance/`
+
+Install from GitHub:
+
+```bash
+codex plugin marketplace add IrvingSun/adaptive-change-governance --ref main
+codex plugin add adaptive-change-governance@adaptive-governance
+```
+
+Install from a local checkout:
+
+```bash
+codex plugin marketplace add /Users/sun/Documents/harness/governance
+codex plugin add adaptive-change-governance@adaptive-governance
+```
+
+After install, start a new Codex session and ask it to use Adaptive Change Governance before technical planning or implementation. The plugin contributes the `change-governance` skill and uses the same `change-assess` CLI runtime as the Claude Code plugin.
