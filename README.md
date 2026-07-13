@@ -57,7 +57,7 @@ claude --plugin-dir ./plugins/adaptive-change-governance
 Install from this local marketplace in Claude Code:
 
 ```text
-/plugin marketplace add /Users/sun/Documents/harness/governance
+/plugin marketplace add <repo-root>
 /plugin install adaptive-change-governance@adaptive-governance
 /reload-plugins
 ```
@@ -87,7 +87,7 @@ codex plugin add adaptive-change-governance@adaptive-governance
 Install from a local checkout:
 
 ```bash
-codex plugin marketplace add /Users/sun/Documents/harness/governance
+codex plugin marketplace add <repo-root>
 codex plugin add adaptive-change-governance@adaptive-governance
 ```
 
