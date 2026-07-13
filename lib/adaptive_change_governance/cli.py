@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .config_loader import ConfigError, dump_yaml, load_yaml
 from .human_review import HumanReviewGate, ReviewError
+from .intent_model import load_intent_file
 from .repository_analyzer import RepositoryAnalyzer
 from .risk_evaluator import RiskEvaluator
 from .run_retention import cleanup_runs, render_cleanup_summary
@@ -24,6 +25,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--guardrails", default=".ai-governance/guardrails.yaml")
     parser.add_argument("--workflow-modules", default=".ai-governance/workflow-modules.yaml")
     parser.add_argument("--profile", help="Use .ai-governance/profiles/<profile>/ overrides for project risk and guardrails")
+    parser.add_argument("--intent-file", help="YAML file produced by the host model with structured change intent")
     parser.add_argument("--output", default=".ai-governance/runs")
     parser.add_argument("--run-id")
     parser.add_argument("--review-workflow", help="Print workflow review options for an existing run id or run directory")
@@ -108,12 +110,19 @@ def main(argv: list[str] | None = None) -> int:
     if not request:
         print("ERROR: request is required for assess mode")
         return 2
+    try:
+        intent = load_intent_file(_config_path(root, tool_root, args.intent_file)) if args.intent_file else {}
+    except ConfigError as exc:
+        print(f"ERROR: {exc}")
+        return 2
 
     run_dir = _run_dir(root / args.output, request)
     run_dir.mkdir(parents=True, exist_ok=False)
     (run_dir / "request.md").write_text(f"# Request\n\n{request}\n", encoding="utf-8")
+    if intent:
+        dump_yaml(run_dir / "change-intent.yaml", intent)
 
-    evidence = RepositoryAnalyzer(root).analyze(request, project_risk)
+    evidence = RepositoryAnalyzer(root).analyze(request, project_risk, intent=intent)
     risk = RiskEvaluator(project_risk, guardrails).evaluate(evidence)
     composer = WorkflowComposer(project_risk, workflow_modules)
     workflow = composer.compose(evidence, risk)

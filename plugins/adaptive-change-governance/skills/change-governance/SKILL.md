@@ -8,12 +8,14 @@ description: Use Adaptive Change Governance before technical planning or impleme
 Run from the target repository root:
 
 ```bash
-change-assess "<user request>" --mode assess
+change-assess "<user request>" --mode assess --intent-file <intent-file>
 ```
 
 Required behavior:
 
 - Treat user input as request, not code fact.
+- Before running assessment, infer structured intent into a YAML file with change_kind, included scope, excluded scope, unknowns, and risk_hints.
+- Do not let keyword matches override clear low-risk user intent unless code evidence is strong.
 - Analyze current repository state before scoring risk.
 - Apply hard guardrails before workflow composition.
 - Keep simple menu/copy changes lightweight unless strong evidence shows real data, interface, permission, or deletion impact.

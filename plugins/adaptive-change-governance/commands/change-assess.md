@@ -6,10 +6,35 @@ description: Assess a requested code change, generate evidence/risk/workflow art
 
 Run Adaptive Change Governance for this repository.
 
-Use the request exactly as provided:
+First infer the user's change intent and write it to a temporary YAML file. Treat this as model inference, not code fact:
+
+```yaml
+version: 1
+change_kind: menu_label_change
+summary: short intent summary
+confidence: high
+scope:
+  included:
+    - intended scope item
+  excluded:
+    - out of scope item
+  unknowns:
+    - thing to verify
+risk_hints:
+  data_operation: false
+  database_schema_change: false
+  public_interface_change: false
+  permission_change: false
+  security_change: false
+  financial_change: false
+notes:
+  - INFERENCE: why this intent was selected
+```
+
+Then run the request exactly as provided with the intent file:
 
 ```bash
-change-assess "$ARGUMENTS"
+change-assess "$ARGUMENTS" --intent-file <intent-file>
 ```
 
 After the command finishes:
@@ -51,6 +76,7 @@ Do not ask users to commit `.ai-governance/runs/`; it is a local audit and gate-
 Hard constraints:
 
 - Treat user input as a request, not code fact.
+- Use host-model intent classification first; use keyword scanning as code evidence, not as the source of user intent.
 - Analyze repository facts before risk scoring.
 - Hard guardrails cannot be downgraded or removed.
 - Weak-only guardrail candidates require human confirmation but must not set the hard minimum level.

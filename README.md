@@ -8,6 +8,33 @@ Phase 1 command:
 bin/change-assess "修改需求描述" --mode assess
 ```
 
+For plugin usage, the host model should first infer structured intent and pass it to the CLI:
+
+```yaml
+version: 1
+change_kind: menu_label_change
+summary: rename one menu display label
+confidence: high
+scope:
+  included:
+    - menu display text
+  excluded:
+    - database changes
+    - public API changes
+  unknowns: []
+risk_hints:
+  data_operation: false
+  database_schema_change: false
+  public_interface_change: false
+  permission_change: false
+  security_change: false
+  financial_change: false
+```
+
+```bash
+bin/change-assess "修改需求描述" --intent-file change-intent.yaml
+```
+
 Use the default industry-neutral profile for reusable governance. Use the optional charging profile when assessing charging platform changes:
 
 ```bash
@@ -41,7 +68,7 @@ Approval writes:
 
 Human reviewers can add modules, raise risk, and correct AI assumptions from CLI flags. `human-review.yaml` remains as the audit file, but users do not need to edit it manually. They cannot lower hard-guardrail decisions or remove hard-required modules.
 
-Low-risk menu or copy changes are routed through the lightweight path when the request does not include data, interface, permission, or deletion work. Weak guardrail signals are shown as candidates for human confirmation, but they do not set the hard minimum risk level unless supported by strong evidence.
+Low-risk menu or copy changes are routed through the lightweight path when structured intent says the change is display-only and code evidence does not contradict it. Weak guardrail signals are shown as candidates for human confirmation, but they do not set the hard minimum risk level unless supported by strong evidence.
 
 After workflow approval, generate and approve the technical plan before implementation:
 

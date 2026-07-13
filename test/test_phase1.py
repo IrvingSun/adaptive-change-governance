@@ -93,6 +93,49 @@ class Phase1Test(unittest.TestCase):
         finally:
             shutil.rmtree(temp)
 
+    def test_model_intent_can_route_menu_label_change_lightweight(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            (temp / "frontend/src/layouts").mkdir(parents=True)
+            (temp / "frontend/src/layouts/BotLayout.vue").write_text("<span>群配置</span>\n", encoding="utf-8")
+            (temp / "app/bot").mkdir(parents=True)
+            (temp / "app/bot/shared.py").write_text(
+                "def delete_group_config_cache():\n"
+                "    return {'api_schema': 'message'}\n",
+                encoding="utf-8",
+            )
+            intent = {
+                "version": 1,
+                "change_kind": "menu_label_change",
+                "summary": "rename menu display text only",
+                "confidence": "high",
+                "scope": {
+                    "included": ["rename the backend menu display label"],
+                    "excluded": ["database changes", "public API changes", "permission key changes"],
+                    "unknowns": [],
+                },
+                "risk_hints": {
+                    "data_operation": False,
+                    "database_schema_change": False,
+                    "public_interface_change": False,
+                    "permission_change": False,
+                    "security_change": False,
+                    "financial_change": False,
+                },
+            }
+            evidence = RepositoryAnalyzer(temp).analyze(
+                "把后台「群配置」相关的菜单修改为「业务群配置」",
+                self.project_risk,
+                intent=intent,
+            )
+            risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)
+            self.assertTrue(evidence["code_findings"]["text_only_change"])
+            self.assertEqual("menu_label_change", evidence["request"]["model_intent"]["change_kind"])
+            self.assertEqual("L1", risk["final_level"])
+            self.assertEqual([], risk["triggered_guardrails"])
+        finally:
+            shutil.rmtree(temp)
+
     def test_destructive_database_operation_cannot_drop_hard_gate(self):
         evidence = RepositoryAnalyzer(ROOT).analyze("删除重复的设备端口状态数据。", self.project_risk)
         risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)

@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .intent_model import is_low_risk_intent
+
 
 DOMAIN_KEYWORDS = {
     "financial-calculation": ["money", "amount", "price", "payment", "invoice", "billing", "refund", "settlement", "reconciliation", "金额", "价格", "支付", "账单", "发票", "退款", "结算", "对账", "两位小数"],
@@ -64,7 +66,7 @@ SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules"}
 class RepositoryAnalyzer:
     root: Path
 
-    def analyze(self, request: str, project_risk: dict[str, Any]) -> dict[str, Any]:
+    def analyze(self, request: str, project_risk: dict[str, Any], intent: dict[str, Any] | None = None) -> dict[str, Any]:
         files = self._repository_files()
         domain_keywords = self._merged_domain_keywords(project_risk)
         direct_files = self._find_relevant_files(request, files)
@@ -73,7 +75,8 @@ class RepositoryAnalyzer:
         request_domains = self._match_keywords(request, domain_keywords)
         request_domain_evidence = self._keyword_evidence(request, domain_keywords, "user_request")
         file_domains = self._domains_from_paths(direct_files, domain_keywords)
-        text_only_change = self._is_text_only_change(request)
+        intent = intent or {}
+        text_only_change = is_low_risk_intent(intent) or self._is_text_only_change(request)
         change_types = sorted(set(self._match_keywords(request, CHANGE_TYPE_KEYWORDS) + self._change_types_from_paths(direct_files)))
         if text_only_change:
             change_types = self._text_only_change_types(change_types)
@@ -94,6 +97,7 @@ class RepositoryAnalyzer:
                 "original": request,
                 "normalized_intent": self._normalize_intent(request),
                 "acceptance_criteria": self._acceptance_criteria(request),
+                "model_intent": intent,
             },
             "repository": git_info,
             "code_findings": {
