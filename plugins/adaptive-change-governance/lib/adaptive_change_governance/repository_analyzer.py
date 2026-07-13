@@ -214,6 +214,31 @@ class RepositoryAnalyzer:
         stop = {"the", "and", "for", "with", "一个", "修改", "调整", "修复", "需要"}
         return [token for token in raw if token not in stop]
 
+    def _relation_tokens(self, request: str) -> list[str]:
+        generic = {
+            "delete",
+            "remove",
+            "change",
+            "update",
+            "config",
+            "code",
+            "system",
+            "feature",
+            "function",
+            "删除",
+            "移除",
+            "修改",
+            "调整",
+            "配置",
+            "代码",
+            "对应",
+            "功能",
+            "系统",
+            "管理系统",
+        }
+        tokens = [token for token in self._tokens(request) if token not in generic]
+        return tokens or self._tokens(request)
+
     def _normalize_intent(self, request: str) -> str:
         return " ".join(request.strip().split())
 
@@ -349,6 +374,7 @@ class RepositoryAnalyzer:
     def _file_keyword_evidence(self, findings: list[dict[str, str]], mapping: dict[str, list[str]], source_kind: str, request: str) -> list[dict[str, str]]:
         evidence = []
         request_tokens = self._tokens(request)
+        relation_tokens = self._relation_tokens(request)
         for finding in findings[:20]:
             path = self.root / finding["path"]
             haystack = finding["path"].lower()
@@ -360,9 +386,10 @@ class RepositoryAnalyzer:
             for value, words in mapping.items():
                 for word in words:
                     if word.lower() in haystack:
-                        strength = "strong" if matched_request_tokens else "weak"
+                        relation = self._keyword_relation_context(finding["path"], haystack, word, relation_tokens)
+                        strength = "strong" if relation["strong"] else "weak"
                         prefix = "FACT" if strength == "strong" else "WEAK SIGNAL"
-                        relation = f" also matches request token(s): {', '.join(matched_request_tokens[:5])}" if matched_request_tokens else " but does not match request-specific tokens"
+                        relation_text = self._relation_text(relation, matched_request_tokens)
                         evidence.append({
                             "value": value,
                             "source": "code_search",
@@ -370,10 +397,34 @@ class RepositoryAnalyzer:
                             "keyword": word,
                             "strength": strength,
                             "matched_request_tokens": matched_request_tokens[:10],
-                            "fact": f"{prefix}: {finding['path']} contains keyword '{word}' mapped to {source_kind} {value}{relation}.",
+                            "matched_relation_tokens": relation["tokens"],
+                            "fact": f"{prefix}: {finding['path']} contains keyword '{word}' mapped to {source_kind} {value}{relation_text}.",
                         })
                         break
         return evidence[:50]
+
+    def _keyword_relation_context(self, path: str, haystack: str, keyword: str, relation_tokens: list[str]) -> dict[str, Any]:
+        lower_path = path.lower()
+        lower_keyword = keyword.lower()
+        path_tokens = [token for token in relation_tokens if token in lower_path]
+        if path_tokens:
+            return {"strong": True, "mode": "path", "tokens": path_tokens[:10]}
+        for line in haystack.splitlines():
+            if lower_keyword not in line:
+                continue
+            line_tokens = [token for token in relation_tokens if token in line]
+            if line_tokens:
+                return {"strong": True, "mode": "same_line", "tokens": line_tokens[:10]}
+        return {"strong": False, "mode": "distant_or_absent", "tokens": []}
+
+    def _relation_text(self, relation: dict[str, Any], matched_request_tokens: list[str]) -> str:
+        if relation["strong"] and relation["mode"] == "path":
+            return f" and its path matches request-specific token(s): {', '.join(relation['tokens'][:5])}"
+        if relation["strong"]:
+            return f" and the keyword appears on the same line as request-specific token(s): {', '.join(relation['tokens'][:5])}"
+        if matched_request_tokens:
+            return f", but request token(s) {', '.join(matched_request_tokens[:5])} are not in the path or near this keyword"
+        return " but does not match request-specific tokens"
 
     def _merged_domain_keywords(self, project_risk: dict[str, Any]) -> dict[str, list[str]]:
         merged = {key: list(values) for key, values in DOMAIN_KEYWORDS.items()}

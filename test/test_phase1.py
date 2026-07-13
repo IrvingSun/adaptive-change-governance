@@ -121,6 +121,30 @@ class Phase1Test(unittest.TestCase):
         finally:
             shutil.rmtree(temp)
 
+    def test_distant_feature_token_does_not_make_delete_file_strong(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            (temp / "app/api").mkdir(parents=True)
+            (temp / "app/api/auth.py").write_text(
+                "API_TITLE = 'IoT management system'\n\n"
+                "def delete_session(session_id):\n"
+                "    sql = 'delete from auth_sessions where id = ?'\n"
+                "    return sql\n",
+                encoding="utf-8",
+            )
+            evidence = RepositoryAnalyzer(temp).analyze("将IoT设备调试功能从管理系统中移除，并删除对应的代码和配置", self.project_risk)
+            risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)
+            self.assertNotIn("destructive-database-operation", risk["triggered_guardrails"])
+            self.assertNotIn("delete", evidence["code_findings"]["operations"])
+            weak_delete = [
+                item for item in evidence["code_findings"]["operation_evidence"]
+                if item.get("path") == "app/api/auth.py" and item.get("keyword") == "delete"
+            ]
+            self.assertTrue(weak_delete)
+            self.assertTrue(all(item.get("strength") == "weak" for item in weak_delete))
+        finally:
+            shutil.rmtree(temp)
+
     def test_charging_profile_distinguishes_device_data_from_device_control(self):
         data_evidence = RepositoryAnalyzer(ROOT).analyze("删除重复的设备端口状态数据。", self.charging_project_risk)
         data_risk = RiskEvaluator(self.charging_project_risk, self.charging_guardrails).evaluate(data_evidence)
