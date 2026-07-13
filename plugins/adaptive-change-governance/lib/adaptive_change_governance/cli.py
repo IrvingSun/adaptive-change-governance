@@ -38,7 +38,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--comment", action="append", default=[])
     args = parser.parse_args(argv)
 
-    root = Path.cwd()
+    try:
+        root = _project_root()
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}")
+        return 2
     if args.profile:
         profile_root = Path(".ai-governance") / "profiles" / args.profile
         args.risk_profile = str(profile_root / "project-risk.yaml")
@@ -205,3 +209,15 @@ def _config_path(project_root: Path, tool_root: Path, configured: str) -> Path:
     if project_path.exists():
         return project_path
     return tool_root / path
+
+
+def _project_root() -> Path:
+    try:
+        return Path.cwd()
+    except OSError:
+        pwd = os.environ.get("PWD")
+        if pwd:
+            candidate = Path(pwd)
+            if candidate.exists():
+                return candidate.resolve()
+        raise RuntimeError("cannot determine current working directory; run change-assess from an existing project directory")

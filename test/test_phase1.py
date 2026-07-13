@@ -11,6 +11,7 @@ import sys
 sys.path.insert(0, str(ROOT / "lib"))
 
 from adaptive_change_governance.config_loader import load_yaml
+import adaptive_change_governance.cli as cli_module
 from adaptive_change_governance.human_review import HumanReviewGate, ReviewError
 from adaptive_change_governance.repository_analyzer import RepositoryAnalyzer
 from adaptive_change_governance.risk_evaluator import RiskEvaluator
@@ -94,6 +95,22 @@ class Phase1Test(unittest.TestCase):
             self.assertTrue(any("git metadata" in item for item in evidence["unknowns"]))
             self.assertTrue(any("dynamic calls" in item for item in evidence["unknowns"]))
         finally:
+            shutil.rmtree(temp)
+
+    def test_project_root_falls_back_to_pwd_when_cwd_fails(self):
+        temp = Path(tempfile.mkdtemp())
+        original_cwd = cli_module.Path.cwd
+        original_pwd = os.environ.get("PWD")
+        try:
+            cli_module.Path.cwd = classmethod(lambda cls: (_ for _ in ()).throw(OSError("cwd unavailable")))
+            os.environ["PWD"] = str(temp)
+            self.assertEqual(temp.resolve(), cli_module._project_root())
+        finally:
+            cli_module.Path.cwd = original_cwd
+            if original_pwd is None:
+                os.environ.pop("PWD", None)
+            else:
+                os.environ["PWD"] = original_pwd
             shutil.rmtree(temp)
 
     def test_cli_assess_generates_phase1_artifacts_and_stops(self):
