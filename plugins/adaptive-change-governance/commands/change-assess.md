@@ -27,6 +27,18 @@ change-assess --approve-workflow <run_id> --raise-level L4 --reason "reason"
 
 Use `change-assess --review-decision <run_id> --decision reassess --comment "reason"` when the user requests reassessment instead of approval.
 
+After workflow approval:
+
+```bash
+change-assess --add-context <run_id> --include "scope item" --exclude "out of scope" --user-fact "confirmed fact"
+change-assess --propose-technical-plan <run_id>
+change-assess --review-technical-plan <run_id>
+change-assess --approve-technical-plan <run_id>
+change-assess --check-gate <run_id> --stage implementation
+```
+
+Do not modify business code until the implementation gate returns `GATE OK`.
+
 For local run retention, use:
 
 ```bash
@@ -43,3 +55,4 @@ Hard constraints:
 - Hard guardrails cannot be downgraded or removed.
 - Workflow approval must happen before technical planning.
 - Technical-plan approval must happen before business-code edits.
+- Implementation must be preceded by `change-assess --check-gate <run_id> --stage implementation`.

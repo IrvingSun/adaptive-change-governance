@@ -12,6 +12,7 @@ from .repository_analyzer import RepositoryAnalyzer
 from .risk_evaluator import RiskEvaluator
 from .run_retention import cleanup_runs, render_cleanup_summary
 from .schema_validator import ValidationError, validate_all
+from .technical_plan import TechnicalPlanError, TechnicalPlanGate
 from .workflow_composer import WorkflowComposer
 
 
@@ -28,9 +29,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--review-workflow", help="Print workflow review options for an existing run id or run directory")
     parser.add_argument("--approve-workflow", help="Approve workflow for an existing run id or run directory")
     parser.add_argument("--review-decision", help="Set review decision for an existing run id or run directory")
+    parser.add_argument("--propose-technical-plan", help="Generate technical-plan.yaml/md after workflow approval")
+    parser.add_argument("--review-technical-plan", help="Review technical plan coverage and approval commands")
+    parser.add_argument("--approve-technical-plan", help="Approve a generated technical plan")
+    parser.add_argument("--check-gate", help="Check whether a run may enter a stage")
+    parser.add_argument("--add-context", help="Add facts, corrections, or scope context to a run id or run directory")
     parser.add_argument("--cleanup-runs", action="store_true", help="Clean old .ai-governance/runs entries according to audit_retention policy")
     parser.add_argument("--cleanup-dry-run", action="store_true", help="Show which run entries would be deleted without deleting them")
     parser.add_argument("--decision", choices=["approve", "reject", "request_changes", "reassess"])
+    parser.add_argument("--stage", choices=["technical_plan", "implementation"])
     parser.add_argument("--reviewer")
     parser.add_argument("--raise-level", choices=["L1", "L2", "L3", "L4"])
     parser.add_argument("--reason")
@@ -39,6 +46,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--user-fact", action="append", default=[])
     parser.add_argument("--correction", action="append", default=[])
     parser.add_argument("--comment", action="append", default=[])
+    parser.add_argument("--include", action="append", default=[])
+    parser.add_argument("--exclude", action="append", default=[])
+    parser.add_argument("--prohibit", action="append", default=[])
+    parser.add_argument("--unknown", action="append", default=[])
     args = parser.parse_args(argv)
 
     try:
@@ -71,6 +82,21 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.approve_workflow:
         return _approve_workflow(root, Path(args.output), args.approve_workflow, args, project_risk, workflow_modules)
+
+    if args.add_context:
+        return _add_context(root, Path(args.output), args.add_context, args, workflow_modules)
+
+    if args.propose_technical_plan:
+        return _propose_technical_plan(root, Path(args.output), args.propose_technical_plan, workflow_modules)
+
+    if args.review_technical_plan:
+        return _review_technical_plan(root, Path(args.output), args.review_technical_plan, workflow_modules)
+
+    if args.approve_technical_plan:
+        return _approve_technical_plan(root, Path(args.output), args.approve_technical_plan, args, workflow_modules)
+
+    if args.check_gate:
+        return _check_gate(root, Path(args.output), args.check_gate, args, workflow_modules)
 
     if args.cleanup_runs:
         return _cleanup_runs(root, Path(args.output), project_risk, args.cleanup_dry_run)
@@ -180,6 +206,84 @@ def _cleanup_runs(root: Path, output_root: Path, project_risk: dict, dry_run: bo
     policy = project_risk.get("audit_retention", {})
     result = cleanup_runs(root / output_root, policy, dry_run=dry_run)
     print(render_cleanup_summary(result), end="")
+    return 0
+
+
+def _add_context(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, workflow_modules: dict) -> int:
+    run_dir = _resolve_run_dir(root, output_root, run_id)
+    if not run_dir.exists():
+        print(f"ERROR: run not found: {run_id}")
+        return 2
+    context = TechnicalPlanGate(workflow_modules).add_run_context(
+        run_dir,
+        facts=args.user_fact,
+        corrections=args.correction,
+        include=args.include,
+        exclude=args.exclude,
+        prohibit=args.prohibit,
+        unknown=args.unknown,
+    )
+    print(f"Run context updated: {run_dir}")
+    print(f"Facts: {len(context.get('facts', []))}")
+    print(f"Corrections: {len(context.get('corrections', []))}")
+    return 0
+
+
+def _propose_technical_plan(root: Path, output_root: Path, run_id: str, workflow_modules: dict) -> int:
+    run_dir = _resolve_run_dir(root, output_root, run_id)
+    if not run_dir.exists():
+        print(f"ERROR: run not found: {run_id}")
+        return 2
+    try:
+        plan = TechnicalPlanGate(workflow_modules).propose(run_dir)
+    except (ConfigError, TechnicalPlanError) as exc:
+        print(f"BLOCKED: {exc}")
+        return 3
+    print(f"Technical plan generated: {run_dir / 'technical-plan.yaml'}")
+    print(f"Validation: {plan.get('validation', {}).get('status')}")
+    print(f"Review command: change-assess --review-technical-plan {run_dir.name}")
+    return 0
+
+
+def _review_technical_plan(root: Path, output_root: Path, run_id: str, workflow_modules: dict) -> int:
+    run_dir = _resolve_run_dir(root, output_root, run_id)
+    if not run_dir.exists():
+        print(f"ERROR: run not found: {run_id}")
+        return 2
+    try:
+        print(TechnicalPlanGate(workflow_modules).review_summary(run_dir), end="")
+    except (ConfigError, TechnicalPlanError) as exc:
+        print(f"ERROR: {exc}")
+        return 2
+    return 0
+
+
+def _approve_technical_plan(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, workflow_modules: dict) -> int:
+    run_dir = _resolve_run_dir(root, output_root, run_id)
+    if not run_dir.exists():
+        print(f"ERROR: run not found: {run_id}")
+        return 2
+    try:
+        TechnicalPlanGate(workflow_modules).approve(run_dir, reviewer=args.reviewer)
+    except (ConfigError, TechnicalPlanError) as exc:
+        print(f"BLOCKED: {exc}")
+        return 3
+    print(f"Technical plan approved: {run_dir}")
+    print(f"Gate command: change-assess --check-gate {run_dir.name} --stage implementation")
+    return 0
+
+
+def _check_gate(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, workflow_modules: dict) -> int:
+    run_dir = _resolve_run_dir(root, output_root, run_id)
+    if not run_dir.exists():
+        print(f"ERROR: run not found: {run_id}")
+        return 2
+    stage = args.stage or "implementation"
+    errors = TechnicalPlanGate(workflow_modules).check_gate(run_dir, stage)
+    if errors:
+        print("BLOCKED: " + "; ".join(errors))
+        return 3
+    print(f"GATE OK: {stage} may start")
     return 0
 
 

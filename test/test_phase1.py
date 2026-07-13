@@ -277,6 +277,118 @@ class Phase1Test(unittest.TestCase):
         finally:
             shutil.rmtree(temp)
 
+    def test_technical_plan_gate_requires_workflow_then_approval(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            shutil.copytree(ROOT / ".ai-governance", temp / ".ai-governance", ignore=shutil.ignore_patterns("runs"))
+            shutil.copytree(ROOT / "lib", temp / "lib")
+            shutil.copytree(ROOT / "bin", temp / "bin")
+            subprocess.run(["git", "init"], cwd=temp, check=True, capture_output=True, text=True)
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(temp / "lib")
+            assess = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "修改后台订单页面上的提示文案。"],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(assess.returncode, 0, assess.stderr + assess.stdout)
+            run_dir = next((temp / ".ai-governance/runs").iterdir())
+
+            blocked_plan = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--propose-technical-plan", run_dir.name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(3, blocked_plan.returncode)
+            self.assertIn("workflow approval is required", blocked_plan.stdout)
+
+            approval = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--approve-workflow", run_dir.name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(approval.returncode, 0, approval.stderr + approval.stdout)
+            context = subprocess.run(
+                [
+                    sys.executable,
+                    str(temp / "bin/change-assess"),
+                    "--add-context",
+                    run_dir.name,
+                    "--include",
+                    "edit copy text",
+                    "--exclude",
+                    "business logic changes",
+                    "--user-fact",
+                    "copy-only change confirmed",
+                ],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(context.returncode, 0, context.stderr + context.stdout)
+
+            proposed = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--propose-technical-plan", run_dir.name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proposed.returncode, 0, proposed.stderr + proposed.stdout)
+            self.assertTrue((run_dir / "technical-plan.yaml").exists())
+            plan = load_yaml(run_dir / "technical-plan.yaml")
+            self.assertEqual("pass", plan["validation"]["status"])
+            self.assertIn("edit copy text", plan["scope"]["included"])
+            for module in load_yaml(run_dir / "approved-workflow.yaml")["workflow_recommendation"]["required_modules"]:
+                self.assertIn(module, plan["module_coverage"])
+
+            blocked_gate = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--check-gate", run_dir.name, "--stage", "implementation"],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(3, blocked_gate.returncode)
+            self.assertIn("technical plan has not been approved", blocked_gate.stdout)
+
+            technical_approval = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--approve-technical-plan", run_dir.name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(technical_approval.returncode, 0, technical_approval.stderr + technical_approval.stdout)
+            self.assertTrue((run_dir / ".technical-plan-approved").exists())
+
+            gate = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--check-gate", run_dir.name, "--stage", "implementation"],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(gate.returncode, 0, gate.stderr + gate.stdout)
+            self.assertIn("GATE OK", gate.stdout)
+        finally:
+            shutil.rmtree(temp)
+
     def test_cli_review_workflow_lists_user_actions(self):
         temp = Path(tempfile.mkdtemp())
         try:

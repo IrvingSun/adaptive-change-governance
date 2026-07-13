@@ -17,7 +17,8 @@ Required behavior:
 - Analyze current repository state before scoring risk.
 - Apply hard guardrails before workflow composition.
 - Stop after `workflow-plan.md` until human approval is present.
-- Do not generate a technical plan or modify business code before approval gates.
+- Do not generate a technical plan before workflow approval.
+- Do not modify business code before technical-plan approval and implementation gate check.
 
 Use command-line review and approval. Do not ask users to manually edit `human-review.yaml`; it is an audit file.
 Run artifacts in `.ai-governance/runs/` are local audit and gate-state files; keep them gitignored by default. Use `change-assess --cleanup-runs --cleanup-dry-run` before deleting old runs.
@@ -25,5 +26,10 @@ Run artifacts in `.ai-governance/runs/` are local audit and gate-state files; ke
 ```bash
 change-assess --review-workflow <run_id>
 change-assess --approve-workflow <run_id> --add-required threat_analysis
+change-assess --add-context <run_id> --include "scope item" --exclude "out of scope" --user-fact "confirmed fact"
+change-assess --propose-technical-plan <run_id>
+change-assess --review-technical-plan <run_id>
+change-assess --approve-technical-plan <run_id>
+change-assess --check-gate <run_id> --stage implementation
 change-assess --review-decision <run_id> --decision reassess --comment "reason"
 ```

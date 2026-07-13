@@ -41,6 +41,27 @@ Approval writes:
 
 Human reviewers can add modules, raise risk, and correct AI assumptions from CLI flags. `human-review.yaml` remains as the audit file, but users do not need to edit it manually. They cannot lower hard-guardrail decisions or remove hard-required modules.
 
+After workflow approval, generate and approve the technical plan before implementation:
+
+```bash
+bin/change-assess --add-context <run_id> --include "..." --exclude "..." --user-fact "..."
+bin/change-assess --propose-technical-plan <run_id>
+bin/change-assess --review-technical-plan <run_id>
+bin/change-assess --approve-technical-plan <run_id>
+bin/change-assess --check-gate <run_id> --stage implementation
+```
+
+The technical-plan gate writes:
+
+- `run-context.yaml`
+- `technical-plan.yaml`
+- `technical-plan.md`
+- `approved-technical-plan.yaml`
+- `approved-technical-plan.md`
+- `.technical-plan-approved`
+
+Implementation must remain blocked until `--check-gate <run_id> --stage implementation` returns `GATE OK`.
+
 Run artifacts under `.ai-governance/runs/` are local audit and gate-state files. They are ignored by Git by default. Use the retention policy in `.ai-governance/project-risk.yaml` to control local history size:
 
 ```yaml
