@@ -1,0 +1,275 @@
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+
+DOMAIN_KEYWORDS = {
+    "financial-calculation": ["money", "amount", "price", "payment", "invoice", "billing", "refund", "settlement", "reconciliation", "金额", "价格", "支付", "账单", "发票", "退款", "结算", "对账", "两位小数"],
+    "data-integrity": ["data", "record", "consistency", "state", "数据", "记录", "一致性", "状态"],
+    "authentication": ["authentication", "login", "authn", "登录", "认证"],
+    "authorization": ["authorization", "permission", "role", "authz", "权限", "授权"],
+    "credentials": ["credential", "secret", "password", "token", "jwt", "密钥", "密码", "凭证", "令牌"],
+    "privacy-data": ["privacy", "personal data", "pii", "personal information", "隐私", "个人信息", "个人数据"],
+    "public-interface": ["api", "endpoint", "route", "controller", "openapi", "接口"],
+    "message-contract": ["message", "event", "queue", "topic", "kafka", "消息", "事件"],
+    "database-schema": ["migration", "schema", "ddl", "alter table", "create table", "drop table", "数据库", "表结构"],
+    "external-system-control": ["webhook", "third-party", "external api", "provider", "外部系统", "第三方"],
+    "physical-device-control": ["device command", "firmware", "protocol", "actuator", "power off", "start command", "stop command", "设备指令", "控制指令", "固件", "协议", "启动指令", "停止指令", "断电"],
+}
+
+CHANGE_TYPE_KEYWORDS = {
+    "database_schema": ["migration", "schema", "ddl", "alter table", "create table", "drop table", "数据库", "表结构"],
+    "message_schema": ["message", "event", "queue", "topic", "kafka", "schema", "消息", "事件"],
+    "public_api": ["api", "endpoint", "route", "controller", "openapi", "接口"],
+    "business_logic": ["logic", "service", "rule", "计算", "规则", "状态"],
+    "configuration": ["config", "yaml", "yml", "json", "配置"],
+    "documentation": ["docs", "readme", "文档", "提示文案", "文案"],
+}
+
+OPERATION_KEYWORDS = {
+    "delete": ["delete", "remove", "删除"],
+    "truncate": ["truncate", "清空"],
+    "irreversible_migration": ["drop table", "drop column", "不可逆", "irreversible"],
+    "bulk_update": ["bulk update", "批量更新", "update all", "历史数据"],
+}
+
+SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules"}
+
+
+@dataclass
+class RepositoryAnalyzer:
+    root: Path
+
+    def analyze(self, request: str, project_risk: dict[str, Any]) -> dict[str, Any]:
+        files = self._repository_files()
+        domain_keywords = self._merged_domain_keywords(project_risk)
+        direct_files = self._find_relevant_files(request, files)
+        tests = self._find_tests(files)
+        git_info = self._git_info()
+        request_domains = self._match_keywords(request, domain_keywords)
+        file_domains = self._domains_from_paths(direct_files, domain_keywords)
+        change_types = sorted(set(self._match_keywords(request, CHANGE_TYPE_KEYWORDS) + self._change_types_from_paths(direct_files)))
+        operations = self._match_keywords(request, OPERATION_KEYWORDS)
+        database_changes = "database_schema" in change_types or bool({"delete", "truncate", "irreversible_migration", "bulk_update"} & set(operations))
+        public_api_changes = "public_api" in change_types
+        message_schema_changes = "message_schema" in change_types
+        related_files = self._related_files(direct_files, files)
+        unknowns = self._unknowns(direct_files, related_files, tests, git_info)
+
+        affected_domains = sorted(set(request_domains + file_domains))
+        affected_modules = sorted({Path(item["path"]).parts[0] for item in direct_files + related_files if Path(item["path"]).parts})
+
+        return {
+            "version": 1,
+            "request": {
+                "original": request,
+                "normalized_intent": self._normalize_intent(request),
+                "acceptance_criteria": self._acceptance_criteria(request),
+            },
+            "repository": git_info,
+            "code_findings": {
+                "direct_files": direct_files,
+                "related_files": related_files,
+                "affected_modules": affected_modules,
+                "affected_domains": affected_domains,
+                "change_types": change_types,
+                "operations": operations,
+                "database_changes": database_changes,
+                "message_schema_changes": message_schema_changes,
+                "public_api_changes": public_api_changes,
+                "scheduled_jobs_affected": self._path_or_request_matches(direct_files, request, ["cron", "job", "scheduler", "定时"]),
+                "configuration_changes": "configuration" in change_types,
+            },
+            "dependency_findings": {
+                "upstream": [],
+                "downstream": [item["path"] for item in related_files[:20]],
+                "external_dependencies": self._external_dependencies(files),
+            },
+            "test_findings": {
+                "existing_tests": tests,
+                "coverage_confidence": "low" if not tests else "medium",
+                "missing_test_areas": self._missing_test_areas(affected_domains, tests),
+            },
+            "runtime_findings": {
+                "production_usage": "unknown",
+                "traffic_level": "unknown",
+                "observability": self._health_label(project_risk.get("engineering_health", {}).get("observability")),
+                "rollback_capability": self._health_label(project_risk.get("engineering_health", {}).get("rollback_capability")),
+            },
+            "unknowns": unknowns,
+            "evidence_sources": ["user_request", "code_search", "git_status", "git_diff", "test_files", "project_risk_profile", "guardrails"],
+        }
+
+    def _repository_files(self) -> list[Path]:
+        result = []
+        for current_root, dirs, files in os.walk(self.root):
+            rel_root = Path(current_root).relative_to(self.root)
+            dirs[:] = [d for d in dirs if str(rel_root / d) not in SKIP_DIRS and d not in SKIP_DIRS]
+            dirs[:] = [d for d in dirs if ".ai-governance/runs" not in (rel_root / d).as_posix()]
+            for filename in files:
+                path = Path(current_root) / filename
+                if path.is_file():
+                    result.append(path)
+        return result
+
+    def _find_relevant_files(self, request: str, files: list[Path]) -> list[dict[str, str]]:
+        tokens = self._tokens(request)
+        findings = []
+        for path in files:
+            rel = path.relative_to(self.root).as_posix()
+            if ".ai-governance/runs/" in rel:
+                continue
+            score = sum(1 for token in tokens if token in rel.lower())
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore").lower()
+            except OSError:
+                text = ""
+            score += sum(1 for token in tokens if token and token in text)
+            if score:
+                findings.append({"path": rel, "reason": f"FACT: matched {score} request token(s) in path or content"})
+        return findings[:50]
+
+    def _related_files(self, direct_files: list[dict[str, str]], files: list[Path]) -> list[dict[str, str]]:
+        stems = {Path(item["path"]).stem.lower() for item in direct_files}
+        if not stems:
+            return []
+        related = []
+        for path in files:
+            rel = path.relative_to(self.root).as_posix()
+            if any(item["path"] == rel for item in direct_files):
+                continue
+            lower = rel.lower()
+            if any(stem and stem in lower for stem in stems):
+                related.append({"path": rel, "reason": "INFERENCE: filename suggests relation to direct finding"})
+        return related[:50]
+
+    def _find_tests(self, files: list[Path]) -> list[str]:
+        tests = []
+        for path in files:
+            rel = path.relative_to(self.root).as_posix()
+            lower = rel.lower()
+            if lower.startswith("test/") or lower.startswith("tests/") or "_test." in lower or lower.endswith(".test.js") or lower.endswith(".spec.js"):
+                tests.append(rel)
+        return sorted(tests)
+
+    def _git_info(self) -> dict[str, Any]:
+        inside = self._git(["rev-parse", "--is-inside-work-tree"])
+        if inside.returncode != 0:
+            return {
+                "branch": "unknown",
+                "commit": "unknown",
+                "dirty": True,
+                "git_available": False,
+                "status": "UNKNOWN: not a git repository",
+                "diff_summary": [],
+            }
+        branch = self._git(["branch", "--show-current"]).stdout.strip() or "unknown"
+        commit_result = self._git(["rev-parse", "HEAD"])
+        commit = commit_result.stdout.strip() if commit_result.returncode == 0 else "unknown"
+        status = self._git(["status", "--short"]).stdout.strip()
+        diff = self._git(["diff", "--name-status"]).stdout.strip().splitlines()
+        return {
+            "branch": branch,
+            "commit": commit,
+            "dirty": bool(status),
+            "git_available": True,
+            "status": status or "clean",
+            "diff_summary": diff,
+        }
+
+    def _git(self, args: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(["git", *args], cwd=self.root, text=True, capture_output=True, check=False)
+
+    def _tokens(self, request: str) -> list[str]:
+        raw = re.findall(r"[a-zA-Z0-9_\-]{2,}|[\u4e00-\u9fff]{2,}", request.lower())
+        stop = {"the", "and", "for", "with", "一个", "修改", "调整", "修复", "需要"}
+        return [token for token in raw if token not in stop]
+
+    def _normalize_intent(self, request: str) -> str:
+        return " ".join(request.strip().split())
+
+    def _acceptance_criteria(self, request: str) -> list[str]:
+        criteria = []
+        if any(word in request for word in ["确保", "必须", "验收", "should", "must"]):
+            criteria.append("FACT: request contains explicit requirement language; preserve stated behavior.")
+        criteria.append("INFERENCE: change should satisfy the user request without introducing regression in affected modules.")
+        return criteria
+
+    def _match_keywords(self, text: str, mapping: dict[str, list[str]]) -> list[str]:
+        lower = text.lower()
+        return sorted([key for key, words in mapping.items() if any(word.lower() in lower for word in words)])
+
+    def _merged_domain_keywords(self, project_risk: dict[str, Any]) -> dict[str, list[str]]:
+        merged = {key: list(values) for key, values in DOMAIN_KEYWORDS.items()}
+        configured = project_risk.get("domain_keywords", {})
+        if isinstance(configured, dict):
+            for domain, values in configured.items():
+                if isinstance(values, list):
+                    merged.setdefault(domain, [])
+                    merged[domain].extend(str(value) for value in values)
+        return merged
+
+    def _domains_from_paths(self, findings: list[dict[str, str]], domain_keywords: dict[str, list[str]]) -> list[str]:
+        domains = []
+        for finding in findings:
+            path = finding["path"].lower()
+            domains.extend(self._match_keywords(path, domain_keywords))
+        return sorted(set(domains))
+
+    def _change_types_from_paths(self, findings: list[dict[str, str]]) -> list[str]:
+        change_types = []
+        for finding in findings:
+            path = finding["path"].lower()
+            change_types.extend(self._match_keywords(path, CHANGE_TYPE_KEYWORDS))
+            if path.endswith((".md", ".txt", ".rst")):
+                change_types.append("documentation")
+            if path.endswith((".yaml", ".yml", ".json", ".toml", ".ini")):
+                change_types.append("configuration")
+        return sorted(set(change_types))
+
+    def _path_or_request_matches(self, findings: list[dict[str, str]], request: str, words: list[str]) -> bool:
+        haystack = request.lower() + " " + " ".join(item["path"].lower() for item in findings)
+        return any(word in haystack for word in words)
+
+    def _external_dependencies(self, files: list[Path]) -> list[str]:
+        names = []
+        for filename in ("requirements.txt", "package.json", "Gemfile", "pyproject.toml"):
+            if (self.root / filename).exists():
+                names.append(filename)
+        return names
+
+    def _missing_test_areas(self, domains: list[str], tests: list[str]) -> list[str]:
+        if tests:
+            return []
+        if domains:
+            return [f"UNKNOWN: no automated tests found for affected domain {domain}" for domain in domains]
+        return ["UNKNOWN: no automated tests found for request-specific behavior"]
+
+    def _unknowns(self, direct_files: list[dict[str, str]], related_files: list[dict[str, str]], tests: list[str], git_info: dict[str, Any]) -> list[str]:
+        unknowns = []
+        if not direct_files:
+            unknowns.append("UNKNOWN: no direct implementation files found from request keywords")
+        if not related_files:
+            unknowns.append("UNKNOWN: static keyword scan did not identify callers or dependents")
+        if not tests:
+            unknowns.append("UNKNOWN: automated regression coverage is absent or undiscovered")
+        if not git_info.get("git_available"):
+            unknowns.append("UNKNOWN: git metadata and diff are unavailable")
+        if git_info.get("commit") == "unknown":
+            unknowns.append("UNKNOWN: repository has no readable HEAD commit")
+        unknowns.append("UNKNOWN: dynamic calls, framework routes, generated code, and implicit dependencies may be missed by keyword scanning")
+        return unknowns
+
+    def _health_label(self, value: Any) -> str:
+        if not isinstance(value, int):
+            return "unknown"
+        if value <= 2:
+            return "low"
+        if value == 3:
+            return "medium"
+        return "high"

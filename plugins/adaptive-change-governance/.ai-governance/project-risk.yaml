@@ -1,0 +1,171 @@
+version: 1
+
+project:
+  name: adaptive-change-governance
+  description: 可复用的 AI Coding Agent 变更治理与流程路由工具本体，默认配置保持行业无关
+  baseline_level: L2
+
+business_risk:
+  criticality: 3
+  financial_sensitivity: 3
+  data_integrity: 3
+  external_system_control: 3
+  privacy: 3
+  compliance: 3
+  customer_impact: 3
+
+engineering_health:
+  automated_test_coverage: 2
+  observability: 2
+  rollback_capability: 3
+  architecture_clarity: 3
+  dependency_complexity: 2
+  documentation_quality: 3
+
+critical_domains:
+  - financial-calculation
+  - data-integrity
+  - destructive-data-operation
+  - public-interface
+  - message-contract
+  - database-schema
+  - authentication
+  - authorization
+  - credentials
+  - privacy-data
+  - external-system-control
+  - physical-device-control
+  - guardrail-enforcement
+  - risk-evaluation
+  - workflow-gating
+  - approval-state
+  - repository-analysis
+  - evidence-traceability
+  - plugin-entrypoints
+
+critical_paths:
+  - assess command entry
+  - evidence pack generation
+  - hard guardrail application
+  - risk level calculation
+  - workflow plan generation
+  - human approval gates
+
+known_constraints:
+  - hard guardrails must never be downgraded by model judgment
+  - technical plans require workflow approval
+  - implementation requires technical plan approval
+  - keyword scanning has limited confidence for dynamic routes and implicit dependencies
+  - all important judgments must be traceable to user input, code, git diff, risk profile, guardrails, or marked inference
+
+default_human_gates:
+  - workflow_plan_approval
+  - technical_plan_approval
+  - implementation_approval
+
+domain_keywords:
+  financial-calculation:
+    - money
+    - amount
+    - price
+    - payment
+    - invoice
+    - billing
+    - refund
+    - settlement
+    - reconciliation
+    - 金额
+    - 价格
+    - 支付
+    - 账单
+    - 发票
+    - 退款
+    - 结算
+    - 对账
+    - 两位小数
+  data-integrity:
+    - data
+    - record
+    - consistency
+    - state
+    - 数据
+    - 记录
+    - 一致性
+    - 状态
+  authentication:
+    - authentication
+    - login
+    - authn
+    - 登录
+    - 认证
+  authorization:
+    - authorization
+    - permission
+    - role
+    - authz
+    - 权限
+    - 授权
+  credentials:
+    - credential
+    - secret
+    - password
+    - token
+    - jwt
+    - 密钥
+    - 密码
+    - 凭证
+    - 令牌
+  privacy-data:
+    - privacy
+    - personal data
+    - pii
+    - personal information
+    - 隐私
+    - 个人信息
+    - 个人数据
+  public-interface:
+    - api
+    - endpoint
+    - route
+    - controller
+    - openapi
+    - 接口
+  message-contract:
+    - message
+    - event
+    - queue
+    - topic
+    - kafka
+    - 消息
+    - 事件
+  database-schema:
+    - migration
+    - schema
+    - ddl
+    - alter table
+    - create table
+    - drop table
+    - 数据库
+    - 表结构
+  external-system-control:
+    - webhook
+    - third-party
+    - external api
+    - provider
+    - 外部系统
+    - 第三方
+  physical-device-control:
+    - device command
+    - firmware
+    - protocol
+    - actuator
+    - power off
+    - start command
+    - stop command
+    - 设备指令
+    - 控制指令
+    - 固件
+    - 协议
+    - 启动指令
+    - 停止指令
+    - 断电

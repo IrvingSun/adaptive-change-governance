@@ -1,0 +1,99 @@
+version: 1
+
+modules:
+  requirement_confirmation:
+    description: 明确业务目标、边界和验收标准
+    output: confirmed-requirement.md
+  code_fact_scan:
+    description: 扫描当前代码，识别相关文件、模块和依赖
+    output: evidence-pack.yaml
+  dependency_analysis:
+    description: 分析调用链、事件、消息、数据库和外部依赖
+    output: dependency-analysis.md
+  data_impact_analysis:
+    description: 分析历史数据、数据迁移和数据一致性影响
+    output: data-impact.md
+  business_rule_confirmation:
+    description: 核实业务规则及边界条件
+    output: business-rule.md
+  technical_design:
+    description: 形成具体技术方案
+    output: technical-plan.md
+  test_design:
+    description: 形成测试范围和验证策略
+    output: test-plan.md
+  boundary_test:
+    description: 验证边界、异常和极端输入
+    output: test-report.md
+  negative_test:
+    description: 验证拒绝、权限失败和恶意输入路径
+    output: negative-test-report.md
+  regression_test:
+    description: 验证相关模块无回归
+    output: regression-report.md
+  security_regression_test:
+    description: 验证认证、授权、凭证和令牌相关路径无安全回归
+    output: security-regression-report.md
+  reconciliation_test:
+    description: 对关键业务结果进行对账
+    output: reconciliation-report.md
+  independent_review:
+    description: 由独立上下文或独立模型进行审查
+    output: review-report.md
+  adversarial_review:
+    description: 针对遗漏、风险和错误假设进行对抗审查
+    output: adversarial-review.md
+  threat_analysis:
+    description: 分析权限、安全和攻击面
+    output: threat-analysis.md
+  compatibility_analysis:
+    description: 验证上下游兼容性
+    output: compatibility-report.md
+  consumer_analysis:
+    description: 识别公共接口、消息或数据结构的消费者
+    output: consumer-analysis.md
+  migration_plan:
+    description: 明确数据、接口或消息结构迁移策略
+    output: migration-plan.md
+  protocol_verification:
+    description: 核对设备控制协议和指令语义
+    output: protocol-verification.md
+  failure_mode_analysis:
+    description: 分析失败模式、重试和异常恢复路径
+    output: failure-mode-analysis.md
+  real_device_test:
+    description: 使用真实设备验证
+    output: device-test-report.md
+  dry_run:
+    description: 对高风险数据操作进行空跑验证
+    output: dry-run-report.md
+  affected_row_estimation:
+    description: 估算数据操作影响行数和范围
+    output: affected-row-estimation.md
+  backup_or_restore_plan:
+    description: 明确备份、恢复或补偿手段
+    output: backup-restore-plan.md
+  manual_approval:
+    description: 对不可逆或高影响动作进行人工审批
+    output: manual-approval.md
+  direct_production_execution:
+    description: 直接生产执行动作，默认作为禁止项使用
+    output: prohibited-production-execution.md
+  staged_release:
+    description: 分阶段发布
+    output: rollout-plan.md
+  rollback_plan:
+    description: 明确回滚路径
+    output: rollback-plan.md
+  rollback_or_compensation_plan:
+    description: 明确回滚或业务补偿机制
+    output: rollback-plan.md
+  post_release_monitoring:
+    description: 定义上线观察指标和时长
+    output: monitoring-plan.md
+  approval_state_audit:
+    description: 核查人工确认状态文件和状态机转换
+    output: approval-state-audit.md
+  incident_review:
+    description: 重大变更或事故后复盘
+    output: incident-review.md

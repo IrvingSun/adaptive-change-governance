@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+import os
+import sys
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+os.environ.setdefault("ACG_TOOL_ROOT", ROOT)
+LIB = os.path.join(ROOT, "lib")
+if LIB not in sys.path:
+    sys.path.insert(0, LIB)
+
+try:
+    import yaml  # noqa: F401
+except ModuleNotFoundError:
+    print("ERROR: Missing Python dependency: PyYAML")
+    print("Install it with: python3 -m pip install PyYAML")
+    raise SystemExit(2)
+
+from adaptive_change_governance.cli import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())

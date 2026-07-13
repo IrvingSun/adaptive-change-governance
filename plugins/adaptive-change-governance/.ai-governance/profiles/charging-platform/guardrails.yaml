@@ -1,0 +1,80 @@
+version: 1
+
+hard_guardrails:
+  - id: money-change
+    when:
+      any:
+        - affected_domain: financial-calculation
+        - affected_domain: billing
+        - affected_domain: refund
+        - affected_domain: settlement
+        - affected_domain: reconciliation
+    require:
+      - business_rule_confirmation
+      - boundary_test
+      - independent_review
+      - reconciliation_test
+      - rollback_or_compensation_plan
+      - post_release_monitoring
+
+  - id: destructive-database-operation
+    when:
+      any:
+        - operation: delete
+        - operation: truncate
+        - operation: irreversible_migration
+        - operation: bulk_update
+    require:
+      - dry_run
+      - affected_row_estimation
+      - backup_or_restore_plan
+      - manual_approval
+    prohibit:
+      - direct_production_execution
+
+  - id: device-control
+    when:
+      any:
+        - affected_domain: device-command
+        - affected_domain: charging-control
+        - affected_domain: physical-device-control
+    require:
+      - protocol_verification
+      - failure_mode_analysis
+      - real_device_test
+      - rollback_plan
+
+  - id: auth-security
+    when:
+      any:
+        - affected_domain: authentication
+        - affected_domain: authorization
+        - affected_domain: credentials
+    require:
+      - threat_analysis
+      - negative_test
+      - independent_review
+      - security_regression_test
+
+  - id: public-interface-change
+    when:
+      any:
+        - change_type: public_api
+        - change_type: message_schema
+        - change_type: database_schema
+    require:
+      - compatibility_analysis
+      - consumer_analysis
+      - migration_plan
+
+level_overrides:
+  money-change:
+    minimum_level: L3
+  destructive-database-operation:
+    minimum_level: L4
+  auth-security:
+    minimum_level: L3
+  device-control:
+    minimum_level: L3
+  public-interface-change:
+    minimum_level: L3

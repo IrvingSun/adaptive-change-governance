@@ -1,0 +1,33 @@
+{
+  "name": "adaptive-change-governance",
+  "version": "0.1.0",
+  "description": "Reusable change governance and workflow routing for AI coding agents.",
+  "author": {
+    "name": "Adaptive Change Governance Maintainers"
+  },
+  "license": "MIT",
+  "keywords": [
+    "governance",
+    "risk",
+    "workflow",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Adaptive Change Governance",
+    "shortDescription": "Assess change risk before design or implementation.",
+    "longDescription": "Generates evidence packs, risk assessments, and workflow plans with hard guardrails and approval gates for AI coding workflows.",
+    "developerName": "Adaptive Change Governance Maintainers",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Run change assessment for my requested change.",
+      "Create a workflow plan before technical design.",
+      "Check whether hard guardrails apply."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

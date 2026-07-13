@@ -1,0 +1,42 @@
+version: 1
+schemas:
+  project-risk.yaml:
+    required:
+      - version
+      - project.name
+      - project.baseline_level
+      - business_risk
+      - engineering_health
+      - critical_domains
+      - critical_paths
+      - known_constraints
+      - default_human_gates
+  guardrails.yaml:
+    required:
+      - version
+      - hard_guardrails
+      - level_overrides
+  workflow-modules.yaml:
+    required:
+      - version
+      - modules
+  evidence-pack.yaml:
+    required:
+      - version
+      - request
+      - repository
+      - code_findings
+      - dependency_findings
+      - test_findings
+      - runtime_findings
+      - unknowns
+      - evidence_sources
+  risk-assessment.yaml:
+    required:
+      - version
+      - risk_dimensions
+      - weighted_score
+      - calculated_level
+      - final_level
+      - triggered_guardrails
+      - judgments

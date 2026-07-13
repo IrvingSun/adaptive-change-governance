@@ -1,0 +1,103 @@
+version: 1
+
+project:
+  name: charging-platform
+  description: 充电业务核心平台风险画像
+  baseline_level: L4
+
+business_risk:
+  criticality: 5
+  financial_sensitivity: 5
+  data_integrity: 5
+  external_system_control: 5
+  privacy: 3
+  compliance: 3
+  customer_impact: 5
+
+engineering_health:
+  automated_test_coverage: 2
+  observability: 3
+  rollback_capability: 2
+  architecture_clarity: 2
+  dependency_complexity: 4
+  documentation_quality: 2
+
+critical_domains:
+  - billing
+  - refund
+  - order-state
+  - charging-control
+  - device-command
+  - device-data
+  - authentication
+  - authorization
+  - settlement
+  - reconciliation
+
+critical_paths:
+  - order creation
+  - charging start
+  - charging stop
+  - billing
+  - refund
+  - settlement
+
+known_constraints:
+  - production database cannot be modified directly by agent
+  - destructive SQL requires manual approval
+  - device command changes require real device validation
+  - money-related changes require reconciliation
+
+default_human_gates:
+  - workflow_plan_approval
+  - technical_plan_approval
+  - production_change_approval
+
+domain_keywords:
+  billing:
+    - billing
+    - bill
+    - charge fee
+    - 计费
+    - 账单
+  refund:
+    - refund
+    - 退款
+    - 退费
+  settlement:
+    - settlement
+    - 结算
+    - 清分
+  reconciliation:
+    - reconciliation
+    - reconcile
+    - 对账
+  order-state:
+    - order state
+    - order status
+    - 订单状态
+  device-data:
+    - device status
+    - device port
+    - port status
+    - telemetry
+    - 设备状态
+    - 设备端口
+    - 端口状态
+    - 遥测
+  charging-control:
+    - charging start
+    - charging stop
+    - stop charging
+    - start charging
+    - 停止充电
+    - 启动充电
+    - 开始充电
+  device-command:
+    - device command
+    - command retry
+    - control command
+    - 指令
+    - 控制指令
+    - 重试逻辑
+    - 设备指令
