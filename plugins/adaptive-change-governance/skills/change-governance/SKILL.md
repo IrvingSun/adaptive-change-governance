@@ -14,7 +14,8 @@ change-assess "<user request>" --mode assess --intent-file <intent-file>
 Required behavior:
 
 - Treat user input as request, not code fact.
-- Before running assessment, infer structured intent into a YAML file with change_kind, included scope, excluded scope, unknowns, and risk_hints.
+- Before running assessment, infer structured intent into a YAML file with change_kind, request_goal, included scope, excluded scope, unknowns, and risk_hints.
+- Classify `request_goal.type` as `implementation`, `analysis_only`, `decision_support`, or `planning_only` before risk scoring. Analysis-only and decision-support requests stop at their analysis/decision gate and must not be pushed into implementation steps merely because the wording mentions delete, database, API, or permission terms.
 - Do not let keyword matches override clear low-risk user intent unless code evidence is strong.
 - Analyze current repository state before scoring risk.
 - Apply hard guardrails before workflow composition.

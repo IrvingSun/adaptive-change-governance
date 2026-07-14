@@ -19,16 +19,20 @@ class WorkflowComposer:
 
     def compose(self, evidence: dict[str, Any], risk: dict[str, Any]) -> dict[str, Any]:
         final_level = risk["final_level"]
+        request_goal = evidence.get("request", {}).get("request_goal", {})
         required = list(LEVEL_MODULES[final_level])
         required.extend(risk.get("required_by_guardrails", []))
         required = self._dedupe_existing(required)
+        required = self._modules_for_goal(required, request_goal)
         optional = self._optional_modules(evidence, risk, required)
         skipped = self._skipped_modules(required, optional)
-        human_gates = self._human_gates(risk)
+        human_gates = self._human_gates(risk, request_goal)
         escalation_triggers = self._escalation_triggers(evidence)
         return {
             "version": 1,
             "workflow_recommendation": {
+                "request_goal": request_goal,
+                "default_stop_gate": request_goal.get("default_stop_gate", "workflow_plan_approval"),
                 "baseline_level": risk["baseline_level"],
                 "calculated_level": risk["calculated_level"],
                 "final_level": final_level,
@@ -51,6 +55,8 @@ class WorkflowComposer:
             "## 1. 任务摘要",
             f"- FACT: 用户原始诉求：{evidence['request']['original']}",
             f"- INFERENCE: 归一化目标：{evidence['request']['normalized_intent']}",
+            f"- INFERENCE: 请求目标类型：{rec.get('request_goal', {}).get('type', 'implementation')}；requires_code_change={rec.get('request_goal', {}).get('requires_code_change', 'unknown')}",
+            f"- DECISION: 默认停止节点：{rec.get('default_stop_gate', 'workflow_plan_approval')}",
             "",
             "## 2. 当前代码事实",
             f"- FACT: branch={evidence['repository']['branch']}, commit={evidence['repository']['commit']}, dirty={evidence['repository']['dirty']}",
@@ -122,6 +128,27 @@ class WorkflowComposer:
                 result.append(module)
         return result
 
+    def _modules_for_goal(self, required: list[str], request_goal: dict[str, Any]) -> list[str]:
+        goal_type = request_goal.get("type", "implementation")
+        if goal_type in {"analysis_only", "decision_support"}:
+            excluded = {
+                "technical_design",
+                "test_design",
+                "regression_test",
+                "rollback_plan",
+                "staged_release",
+                "post_release_monitoring",
+            }
+            return [module for module in required if module not in excluded]
+        if goal_type == "planning_only":
+            excluded = {
+                "regression_test",
+                "staged_release",
+                "post_release_monitoring",
+            }
+            return [module for module in required if module not in excluded]
+        return required
+
     def _optional_modules(self, evidence: dict[str, Any], risk: dict[str, Any], required: list[str]) -> list[str]:
         optional = []
         if risk["final_level"] == "L3":
@@ -137,7 +164,9 @@ class WorkflowComposer:
                 skipped.append({"module": module, "reason": "DECISION: not required by calculated level, hard guardrail, or current evidence."})
         return skipped
 
-    def _human_gates(self, risk: dict[str, Any]) -> list[str]:
+    def _human_gates(self, risk: dict[str, Any], request_goal: dict[str, Any]) -> list[str]:
+        if request_goal.get("requires_code_change") is False:
+            return [request_goal.get("default_stop_gate", "analysis_complete")]
         gates = list(self.project_risk.get("default_human_gates", []))
         if "workflow_plan_approval" not in gates:
             gates.insert(0, "workflow_plan_approval")

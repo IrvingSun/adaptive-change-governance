@@ -14,6 +14,11 @@ change_kind: menu_label_change
 change_nature: display_text_only
 summary: short intent summary
 confidence: high
+request_goal:
+  type: implementation
+  requires_code_change: true
+  default_stop_gate: workflow_plan_approval
+  rationale: INFERENCE: user asks to modify repository behavior or files
 scope:
   included:
     - intended scope item
@@ -31,6 +36,13 @@ risk_hints:
 notes:
   - INFERENCE: why this intent was selected
 ```
+
+Use `request_goal.type` to separate intent from risk:
+
+- `implementation`: user wants code or config changed; continue through workflow approval, technical plan, and implementation gate.
+- `analysis_only`: user wants facts, risk analysis, or an answer; stop at `analysis_complete`.
+- `decision_support`: user wants a recommendation before deciding; stop at `decision_ready`.
+- `planning_only`: user wants a technical plan but not code edits; stop at `technical_plan_approval`.
 
 Then run the request exactly as provided with the intent file:
 
@@ -85,6 +97,7 @@ Do not ask users to commit `.ai-governance/runs/`; it is a local audit and gate-
 Hard constraints:
 
 - Treat user input as a request, not code fact.
+- Classify `request_goal` before scoring risk. Do not route analysis-only or decision-support questions into implementation steps just because the text mentions delete, database, API, or permission terms.
 - Use host-model intent classification first; use keyword scanning as code evidence, not as the source of user intent.
 - Analyze repository facts before risk scoring.
 - Hard guardrails cannot be downgraded or removed.

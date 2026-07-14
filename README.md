@@ -16,6 +16,11 @@ change_kind: menu_label_change
 change_nature: display_text_only
 summary: rename one menu display label
 confidence: high
+request_goal:
+  type: implementation
+  requires_code_change: true
+  default_stop_gate: workflow_plan_approval
+  rationale: INFERENCE: user asks to modify repository behavior or files
 scope:
   included:
     - menu display text
@@ -35,6 +40,13 @@ risk_hints:
 ```bash
 bin/change-assess "修改需求描述" --intent-file change-intent.yaml
 ```
+
+`request_goal.type` separates the user's desired outcome from the implementation risk:
+
+- `implementation`: code or config should change; continue through workflow approval, technical plan, and implementation gate.
+- `analysis_only`: return facts or risk analysis; stop at `analysis_complete`.
+- `decision_support`: return a recommendation before the user decides; stop at `decision_ready`.
+- `planning_only`: produce a technical plan but do not edit code; stop at `technical_plan_approval`.
 
 Use the default industry-neutral profile for reusable governance. Use the optional charging profile when assessing charging platform changes:
 

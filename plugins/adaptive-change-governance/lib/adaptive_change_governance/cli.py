@@ -161,7 +161,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Run created: {run_dir}")
     print(f"Final level: {risk['final_level']}")
     print(f"Triggered guardrails: {risk['triggered_guardrails'] or []}")
-    print("Next gate: workflow_plan_approval")
+    print(f"Request goal: {workflow['workflow_recommendation'].get('request_goal', {}).get('type', 'implementation')}")
+    print(f"Next gate: {workflow['workflow_recommendation'].get('default_stop_gate', 'workflow_plan_approval')}")
     print(f"Review command: change-assess --review-workflow {run_dir.name}")
     print("No technical plan or business-code changes were produced.")
     return 0
@@ -269,6 +270,11 @@ def _propose_technical_plan(root: Path, output_root: Path, run_id: str, workflow
     if not run_dir.exists():
         print(f"ERROR: run not found: {run_id}")
         return 2
+    workflow = load_yaml(run_dir / "workflow-recommendation.yaml")
+    goal_type = workflow.get("workflow_recommendation", {}).get("request_goal", {}).get("type", "implementation")
+    if goal_type in {"analysis_only", "decision_support"}:
+        print(f"BLOCKED: request goal is {goal_type}; default stop gate is {workflow.get('workflow_recommendation', {}).get('default_stop_gate')}")
+        return 3
     try:
         plan = TechnicalPlanGate(workflow_modules).propose(run_dir)
         ProgressTracker(workflow_modules).mark_done(run_dir, "technical_design", strict=False)

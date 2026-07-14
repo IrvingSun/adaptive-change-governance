@@ -190,6 +190,110 @@ class Phase1Test(unittest.TestCase):
         finally:
             shutil.rmtree(temp)
 
+    def test_analysis_only_goal_stops_without_implementation_modules(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            (temp / "app").mkdir(parents=True)
+            (temp / "app/database.py").write_text("DATABASE_NAME = 'main'\n", encoding="utf-8")
+            intent = {
+                "version": 1,
+                "change_kind": "risk_analysis",
+                "change_nature": "analysis_only",
+                "summary": "分析删除数据库配置的风险，不修改代码",
+                "confidence": "high",
+                "request_goal": {
+                    "type": "analysis_only",
+                    "requires_code_change": False,
+                    "default_stop_gate": "analysis_complete",
+                    "rationale": "INFERENCE: user asks for risk analysis only.",
+                },
+                "scope": {"included": ["risk analysis"], "excluded": ["code changes"], "unknowns": []},
+                "risk_hints": {
+                    "data_operation": False,
+                    "database_schema_change": False,
+                    "public_interface_change": False,
+                    "permission_change": False,
+                    "security_change": False,
+                    "financial_change": False,
+                },
+            }
+            evidence = RepositoryAnalyzer(temp).analyze("分析删除数据库配置会有什么风险", self.project_risk, intent=intent)
+            risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)
+            workflow = WorkflowComposer(self.project_risk, self.modules).compose(evidence, risk)
+            rec = workflow["workflow_recommendation"]
+            self.assertEqual("analysis_only", rec["request_goal"]["type"])
+            self.assertFalse(rec["request_goal"]["requires_code_change"])
+            self.assertEqual("analysis_complete", rec["default_stop_gate"])
+            self.assertEqual([], risk["triggered_guardrails"])
+            self.assertIn("code_fact_scan", rec["required_modules"])
+            self.assertNotIn("technical_design", rec["required_modules"])
+            self.assertNotIn("test_design", rec["required_modules"])
+            self.assertNotIn("regression_test", rec["required_modules"])
+        finally:
+            shutil.rmtree(temp)
+
+    def test_analysis_only_cli_blocks_technical_plan_generation(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            shutil.copytree(ROOT / ".ai-governance", temp / ".ai-governance", ignore=shutil.ignore_patterns("runs"))
+            shutil.copytree(ROOT / "lib", temp / "lib")
+            shutil.copytree(ROOT / "bin", temp / "bin")
+            (temp / "app").mkdir()
+            (temp / "app/database.py").write_text("DATABASE_NAME = 'main'\n", encoding="utf-8")
+            intent_path = temp / "intent.yaml"
+            intent_path.write_text(
+                "\n".join([
+                    "version: 1",
+                    "change_kind: risk_analysis",
+                    "change_nature: analysis_only",
+                    "summary: 分析风险，不修改代码",
+                    "confidence: high",
+                    "request_goal:",
+                    "  type: analysis_only",
+                    "  requires_code_change: false",
+                    "  default_stop_gate: analysis_complete",
+                    "scope:",
+                    "  included: [risk analysis]",
+                    "  excluded: [code changes]",
+                    "  unknowns: []",
+                    "risk_hints:",
+                    "  data_operation: false",
+                    "  database_schema_change: false",
+                    "  public_interface_change: false",
+                    "  permission_change: false",
+                    "  security_change: false",
+                    "  financial_change: false",
+                ]),
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "init"], cwd=temp, check=True, capture_output=True, text=True)
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(temp / "lib")
+            assess = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "分析删除数据库配置会有什么风险", "--intent-file", str(intent_path)],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(assess.returncode, 0, assess.stderr + assess.stdout)
+            self.assertIn("Request goal: analysis_only", assess.stdout)
+            self.assertIn("Next gate: analysis_complete", assess.stdout)
+            run_dir = next((temp / ".ai-governance/runs").iterdir())
+            blocked = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--propose-technical-plan", run_dir.name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(blocked.returncode, 3, blocked.stderr + blocked.stdout)
+            self.assertIn("request goal is analysis_only", blocked.stdout)
+        finally:
+            shutil.rmtree(temp)
+
     def test_destructive_database_operation_cannot_drop_hard_gate(self):
         evidence = RepositoryAnalyzer(ROOT).analyze("删除重复的设备端口状态数据。", self.project_risk)
         risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)

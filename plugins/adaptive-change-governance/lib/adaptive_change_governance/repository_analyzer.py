@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .file_risk import evaluate_file_risk
-from .intent_model import is_low_risk_intent
+from .intent_model import infer_request_goal_from_text, is_low_risk_intent
 
 
 DOMAIN_KEYWORDS = {
@@ -77,6 +77,7 @@ class RepositoryAnalyzer:
         request_domain_evidence = self._keyword_evidence(request, domain_keywords, "user_request")
         file_domains = self._domains_from_paths(direct_files, domain_keywords)
         intent = intent or {}
+        request_goal = intent.get("request_goal") or infer_request_goal_from_text(request)
         text_only_change = is_low_risk_intent(intent) or self._is_text_only_change(request)
         change_types = sorted(set(self._match_keywords(request, CHANGE_TYPE_KEYWORDS) + self._change_types_from_paths(direct_files)))
         if text_only_change:
@@ -101,6 +102,7 @@ class RepositoryAnalyzer:
                 "normalized_intent": self._normalize_intent(request),
                 "acceptance_criteria": self._acceptance_criteria(request),
                 "model_intent": intent,
+                "request_goal": request_goal,
             },
             "repository": git_info,
             "code_findings": {

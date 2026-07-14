@@ -55,6 +55,8 @@ class RiskEvaluator:
         }
 
     def _triggered_guardrails(self, evidence: dict[str, Any], details: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+        if evidence.get("request", {}).get("request_goal", {}).get("requires_code_change") is False:
+            return []
         facts = self._fact_index(evidence)
         strong_ids = {item["id"] for item in details or [] if item.get("strength") == "strong"}
         triggered = []
