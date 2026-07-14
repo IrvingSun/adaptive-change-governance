@@ -78,6 +78,7 @@ change-assess --review-technical-plan <run_id>
 change-assess --approve-technical-plan <run_id>
 change-assess --check-gate <run_id> --stage implementation
 change-assess --verify-diff <run_id>
+change-assess --validate-artifact <run_id> --module dependency_analysis --artifact dependency-analysis.yaml
 ```
 
 Do not modify business code until the implementation gate returns `GATE OK`.
@@ -87,6 +88,8 @@ When a subagent finishes a generated task, run that task's `completion_command`.
 ```bash
 change-assess --complete-step <run_id> --module dependency_analysis --artifact dependency-analysis.yaml --agent dependency-analyzer
 ```
+
+If `.ai-governance/artifact-schemas.yaml` defines a schema for that module, `--complete-step` validates the artifact first. Blocked validation means the step must not be presented as complete.
 
 For local run retention, use:
 
@@ -111,6 +114,7 @@ Hard constraints:
 - After implementation, run `change-assess --verify-diff <run_id>` to produce `diff-verification.yaml/md`; blocked diff verification must stop handoff.
 - For L3/L4 workflows, generate `agent-tasks.yaml` and use subagents for narrow read-only or review-only tasks before implementation.
 - Subagents must report completed workflow modules with `change-assess --complete-step`; the progress status bar must show completed state, elapsed time, and artifact path.
+- Structured subagent artifacts must satisfy `.ai-governance/artifact-schemas.yaml`; missing required fields block completion.
 - Workflow approval must happen before technical planning.
 - Technical-plan approval must happen before business-code edits.
 - Implementation must be preceded by `change-assess --check-gate <run_id> --stage implementation`.

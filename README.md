@@ -131,6 +131,12 @@ Each generated agent task includes a `completion_command`. After a subagent fini
 bin/change-assess --complete-step <run_id> --module dependency_analysis --artifact dependency-analysis.yaml --agent dependency-analyzer
 ```
 
+If `.ai-governance/artifact-schemas.yaml` defines a schema for the module, `--complete-step` validates the artifact before marking the step done. You can also validate explicitly:
+
+```bash
+bin/change-assess --validate-artifact <run_id> --module dependency_analysis --artifact dependency-analysis.yaml
+```
+
 The technical-plan gate writes:
 
 - `run-context.yaml`

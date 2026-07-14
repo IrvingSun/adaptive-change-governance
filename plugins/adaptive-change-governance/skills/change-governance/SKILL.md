@@ -32,6 +32,7 @@ Required behavior:
 Use command-line review and approval. Do not ask users to manually edit `human-review.yaml`; it is an audit file.
 When showing workflow review, include the Chinese progress status bar so the user can see 未执行 / 执行中 / 已执行 and elapsed time per completed step.
 When a subagent completes a generated task, run that task's `completion_command` or call `change-assess --complete-step <run_id> --module <module> --artifact <artifact> --agent <agent>` so the status bar records completed state, elapsed time, and artifact path.
+If `.ai-governance/artifact-schemas.yaml` defines required fields for that module, artifact validation must pass before claiming the step is complete.
 Run artifacts in `.ai-governance/runs/` are local audit and gate-state files; keep them gitignored by default. Use `change-assess --cleanup-runs --cleanup-dry-run` before deleting old runs.
 
 ```bash
@@ -45,6 +46,7 @@ change-assess --review-technical-plan <run_id>
 change-assess --approve-technical-plan <run_id>
 change-assess --check-gate <run_id> --stage implementation
 change-assess --verify-diff <run_id>
+change-assess --validate-artifact <run_id> --module dependency_analysis --artifact dependency-analysis.yaml
 change-assess --complete-step <run_id> --module dependency_analysis --artifact dependency-analysis.yaml --agent dependency-analyzer
 change-assess --review-decision <run_id> --decision reassess --comment "reason"
 ```

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .analysis_report import AnalysisReportGenerator, AnalysisReportError
 from .agent_tasks import AgentTaskComposer, AgentTaskError
+from .artifact_validator import ArtifactValidator, ArtifactValidationError
 from .config_loader import ConfigError, dump_yaml, load_yaml
 from .diff_verifier import DiffVerifier, DiffVerificationError
 from .human_review import HumanReviewGate, ReviewError
@@ -28,6 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--risk-profile", default=".ai-governance/project-risk.yaml")
     parser.add_argument("--guardrails", default=".ai-governance/guardrails.yaml")
     parser.add_argument("--workflow-modules", default=".ai-governance/workflow-modules.yaml")
+    parser.add_argument("--artifact-schemas", default=".ai-governance/artifact-schemas.yaml")
     parser.add_argument("--profile", help="Use .ai-governance/profiles/<profile>/ overrides for project risk and guardrails")
     parser.add_argument("--intent-file", help="YAML file produced by the host model with structured change intent")
     parser.add_argument("--output", default=".ai-governance/runs")
@@ -44,6 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--review-agent-tasks", help="Print generated agent task plan")
     parser.add_argument("--start-step", help="Mark one workflow module as in progress for an existing run id or run directory")
     parser.add_argument("--complete-step", help="Mark one workflow module as completed for an existing run id or run directory")
+    parser.add_argument("--validate-artifact", help="Validate one module artifact for an existing run id or run directory")
     parser.add_argument("--check-gate", help="Check whether a run may enter a stage")
     parser.add_argument("--add-context", help="Add facts, corrections, or scope context to a run id or run directory")
     parser.add_argument("--cleanup-runs", action="store_true", help="Clean old .ai-governance/runs entries according to audit_retention policy")
@@ -85,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         project_risk = load_yaml(_config_path(root, tool_root, args.risk_profile))
         guardrails = load_yaml(_config_path(root, tool_root, args.guardrails))
         workflow_modules = load_yaml(_config_path(root, tool_root, args.workflow_modules))
+        artifact_schemas = _load_optional_yaml(_config_path(root, tool_root, args.artifact_schemas))
         validate_all(project_risk, guardrails, workflow_modules)
     except (ConfigError, ValidationError) as exc:
         print(f"ERROR: {exc}")
@@ -127,7 +131,10 @@ def main(argv: list[str] | None = None) -> int:
         return _start_step(root, Path(args.output), args.start_step, args, workflow_modules)
 
     if args.complete_step:
-        return _complete_step(root, Path(args.output), args.complete_step, args, workflow_modules)
+        return _complete_step(root, Path(args.output), args.complete_step, args, workflow_modules, artifact_schemas)
+
+    if args.validate_artifact:
+        return _validate_artifact(root, Path(args.output), args.validate_artifact, args, artifact_schemas)
 
     if args.check_gate:
         return _check_gate(root, Path(args.output), args.check_gate, args, workflow_modules)
@@ -409,7 +416,7 @@ def _start_step(root: Path, output_root: Path, run_id: str, args: argparse.Names
     return 0
 
 
-def _complete_step(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, workflow_modules: dict) -> int:
+def _complete_step(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, workflow_modules: dict, artifact_schemas: dict) -> int:
     run_dir = _resolve_run_dir(root, output_root, run_id)
     if not run_dir.exists():
         print(f"ERROR: run not found: {run_id}")
@@ -417,6 +424,20 @@ def _complete_step(root: Path, output_root: Path, run_id: str, args: argparse.Na
     if not args.module:
         print("ERROR: --module is required")
         return 2
+    if args.artifact:
+        for artifact in args.artifact:
+            report = ArtifactValidator(artifact_schemas).validate(run_dir, args.module, artifact)
+            if report.get("status") != "pass":
+                ProgressTracker(workflow_modules).mark_blocked(
+                    run_dir,
+                    args.module,
+                    artifacts=args.artifact,
+                    agent=args.agent,
+                    notes=(args.note or []) + report.get("errors", []),
+                )
+                print(f"Artifact validation blocked: {artifact}")
+                print("Errors: " + "; ".join(report.get("errors", [])))
+                return 3
     try:
         tracker = ProgressTracker(workflow_modules)
         tracker.mark_done(
@@ -432,6 +453,31 @@ def _complete_step(root: Path, output_root: Path, run_id: str, args: argparse.Na
     print(f"Step completed: {args.module}")
     print(ProgressTracker(workflow_modules).render(run_dir, color=True), end="")
     return 0
+
+
+def _validate_artifact(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, artifact_schemas: dict) -> int:
+    run_dir = _resolve_run_dir(root, output_root, run_id)
+    if not run_dir.exists():
+        print(f"ERROR: run not found: {run_id}")
+        return 2
+    if not args.module:
+        print("ERROR: --module is required")
+        return 2
+    if not args.artifact:
+        print("ERROR: --artifact is required")
+        return 2
+    try:
+        reports = [ArtifactValidator(artifact_schemas).validate(run_dir, args.module, artifact) for artifact in args.artifact]
+    except ArtifactValidationError as exc:
+        print(f"ERROR: {exc}")
+        return 2
+    status = "pass" if all(report.get("status") == "pass" for report in reports) else "blocked"
+    print(f"Artifact validation: {status}")
+    for report in reports:
+        print(f"Artifact: {report.get('artifact')} status={report.get('status')}")
+        if report.get("errors"):
+            print("Errors: " + "; ".join(report["errors"]))
+    return 0 if status == "pass" else 3
 
 
 def _check_gate(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, workflow_modules: dict) -> int:
@@ -489,6 +535,12 @@ def _config_path(project_root: Path, tool_root: Path, configured: str) -> Path:
     if project_path.exists():
         return project_path
     return tool_root / path
+
+
+def _load_optional_yaml(path: Path) -> dict:
+    if not path.exists():
+        return {"version": 1, "schemas": {}}
+    return load_yaml(path)
 
 
 def _project_root() -> Path:

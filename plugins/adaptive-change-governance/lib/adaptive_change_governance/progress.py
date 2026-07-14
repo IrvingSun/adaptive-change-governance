@@ -112,6 +112,33 @@ class ProgressTracker:
         self._save(run_dir, data)
         return data
 
+    def mark_blocked(
+        self,
+        run_dir: Path,
+        module: str,
+        *,
+        artifacts: list[str] | None = None,
+        agent: str | None = None,
+        notes: list[str] | None = None,
+        strict: bool = True,
+    ) -> dict[str, Any]:
+        data = self._load(run_dir)
+        now = _now()
+        found = False
+        for step in data.get("steps", []):
+            if step.get("id") != module:
+                continue
+            found = True
+            step["status"] = "blocked"
+            step["completed_at"] = ""
+            step["duration_seconds"] = None
+            self._merge_metadata(step, artifacts=artifacts, agent=agent, notes=notes)
+        if not found and strict:
+            raise ValueError(f"workflow module is not in progress tracker: {module}")
+        data["updated_at"] = now
+        self._save(run_dir, data)
+        return data
+
     def render(self, run_dir: Path, color: bool = True) -> str:
         data = self._load(run_dir)
         lines = ["流程状态栏:"]

@@ -713,6 +713,67 @@ class Phase1Test(unittest.TestCase):
             )
             self.assertEqual(started.returncode, 0, started.stderr + started.stdout)
 
+            (run_dir / "dependency-analysis.yaml").write_text(
+                "upstream: []\n"
+                "downstream: []\n",
+                encoding="utf-8",
+            )
+            invalid_completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(temp / "bin/change-assess"),
+                    "--complete-step",
+                    run_dir.name,
+                    "--module",
+                    "dependency_analysis",
+                    "--artifact",
+                    "dependency-analysis.yaml",
+                    "--agent",
+                    "dependency-analyzer",
+                ],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(invalid_completed.returncode, 3, invalid_completed.stderr + invalid_completed.stdout)
+            self.assertIn("Artifact validation blocked", invalid_completed.stdout)
+            self.assertIn("missing required field: external_consumers", invalid_completed.stdout)
+            invalid_progress = load_yaml(run_dir / "progress.yaml")
+            invalid_dependency_step = next(step for step in invalid_progress["steps"] if step["id"] == "dependency_analysis")
+            self.assertEqual("blocked", invalid_dependency_step["status"])
+            self.assertTrue((run_dir / "artifact-validation-dependency_analysis.yaml").exists())
+
+            (run_dir / "dependency-analysis.yaml").write_text(
+                "upstream: []\n"
+                "downstream: []\n"
+                "external_consumers: []\n"
+                "unknowns: []\n"
+                "evidence:\n"
+                "  - FACT: call graph checked\n",
+                encoding="utf-8",
+            )
+            validation = subprocess.run(
+                [
+                    sys.executable,
+                    str(temp / "bin/change-assess"),
+                    "--validate-artifact",
+                    run_dir.name,
+                    "--module",
+                    "dependency_analysis",
+                    "--artifact",
+                    "dependency-analysis.yaml",
+                ],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(validation.returncode, 0, validation.stderr + validation.stdout)
+            self.assertIn("Artifact validation: pass", validation.stdout)
+
             completed = subprocess.run(
                 [
                     sys.executable,

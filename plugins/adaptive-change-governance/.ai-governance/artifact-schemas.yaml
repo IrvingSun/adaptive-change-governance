@@ -1,0 +1,26 @@
+version: 1
+
+schemas:
+  dependency_analysis:
+    description: Dependency analysis must identify callers, consumers, unknowns, and evidence.
+    required_fields:
+      - upstream
+      - downstream
+      - external_consumers
+      - unknowns
+      - evidence
+  data_impact_analysis:
+    description: Data impact analysis must identify operations, estimates, dry-run, rollback, and evidence.
+    required_fields:
+      - data_operations
+      - affected_row_estimate
+      - dry_run
+      - rollback
+      - evidence
+  adversarial_review:
+    description: Adversarial review must challenge assumptions and surface failure modes.
+    required_fields:
+      - assumptions_challenged
+      - failure_modes
+      - blocking_findings
+      - residual_risks
