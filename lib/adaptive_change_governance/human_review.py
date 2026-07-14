@@ -156,6 +156,11 @@ class HumanReviewGate:
         lines.extend(f"  - {item.replace('UNKNOWN: ', '', 1)}" for item in evidence.get("unknowns", []))
         lines.extend([
             "",
+            "Investigation questions:",
+        ])
+        lines.extend(self._investigation_question_lines(evidence))
+        lines.extend([
+            "",
             "Allowed user changes:",
             "  - approve / reject / request_changes / reassess",
             "  - add required modules",
@@ -309,6 +314,11 @@ class HumanReviewGate:
             "## Current Unknowns",
         ])
         lines.extend(f"- UNKNOWN: {item.replace('UNKNOWN: ', '', 1)}" for item in evidence.get("unknowns", []))
+        lines.extend([
+            "",
+            "## Investigation Questions",
+        ])
+        lines.extend(f"- {line.strip()}" for line in self._investigation_question_lines(evidence))
         return "\n".join(lines) + "\n"
 
     def _validate_review_shape(self, review: dict[str, Any]) -> None:
@@ -353,6 +363,15 @@ class HumanReviewGate:
                 for fact in match.get("evidence", []):
                     lines.append(f"    {fact.get('text', fact)}")
         return lines
+
+    def _investigation_question_lines(self, evidence: dict[str, Any]) -> list[str]:
+        questions = evidence.get("investigation_questions", {}).get("questions", [])
+        if not questions:
+            return ["  - none"]
+        return [
+            f"  - [{item.get('priority')}] {item.get('module')} -> {item.get('expected_artifact')}: {item.get('question')}"
+            for item in questions
+        ]
 
     def _ordered(self, modules: set[str], preferred: list[str]) -> list[str]:
         result = [module for module in preferred if module in modules]

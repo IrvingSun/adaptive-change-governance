@@ -78,6 +78,7 @@ Covered facts:
 - related files
 - feature boundary with confirmed files, weak signals, and ambiguous important files
 - file semantic role classification
+- investigation questions compiled from UNKNOWNs, weak guardrails, feature-boundary uncertainty, and sensitive change signals
 - test files
 - affected domains
 - change types
@@ -204,9 +205,11 @@ Implemented after the initial spec:
 - Agent task generation for L3/L4 workflows.
 - Subagent completion tracking with elapsed time and artifact path.
 - Artifact schema validation before marking subagent steps complete.
+- Strict artifact evidence validation with `path`, integer `line`, labeled `fact`, and confidence.
 - Diff verification for low-risk intent and approved technical plan scope; diffs against HEAD (staged included), scans untracked files, and excludes `.ai-governance/runs/` artifacts.
 - `--status` run dashboard.
 - `--next` next-action planner with safe execution mode.
+- Investigation-question artifacts with `--next` routing before technical planning.
 - Guardrail suppression consistency: `requires_code_change: false` only disarms guardrails for analysis/decision goals, never for implementation or planning goals.
 - Honest technical-plan module coverage (`covered` only with completed progress steps; guardrail analysis modules block plan approval until completed).
 - Automatic `.ai-governance/runs/.gitignore` in `gitignored` audit mode.

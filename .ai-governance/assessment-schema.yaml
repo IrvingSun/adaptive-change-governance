@@ -38,6 +38,7 @@ schemas:
       - test_findings
       - runtime_findings
       - unknowns
+      - investigation_questions
       - evidence_sources
   risk-assessment.yaml:
     required:

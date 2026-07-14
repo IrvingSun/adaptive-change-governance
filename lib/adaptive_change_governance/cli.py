@@ -12,6 +12,7 @@ from .artifact_validator import ArtifactValidator, ArtifactValidationError
 from .config_loader import ConfigError, dump_yaml, load_yaml
 from .diff_verifier import DiffVerifier, DiffVerificationError
 from .human_review import HumanReviewGate, ReviewError
+from .investigation_questions import InvestigationQuestionComposer
 from .intent_model import load_intent_file
 from .next_action import NextActionPlanner
 from .progress import ProgressTracker
@@ -21,7 +22,7 @@ from .risk_evaluator import RiskEvaluator, render_risk_markdown
 from .risk_scenarios import RiskScenarioValidator
 from .run_status import RunStatusRenderer
 from .run_retention import cleanup_runs, render_cleanup_summary
-from .schema_validator import ValidationError, validate_all, validate_risk_calibration
+from .schema_validator import ValidationError, validate_all, validate_artifact_schemas, validate_risk_calibration
 from .technical_plan import TechnicalPlanError, TechnicalPlanGate
 from .verification_report import VerificationReportGenerator
 from .workflow_composer import WorkflowComposer
@@ -104,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
         artifact_schemas = _load_optional_yaml(_config_path(root, tool_root, args.artifact_schemas))
         risk_calibration = _load_optional_yaml(_config_path(root, tool_root, args.risk_calibration))
         validate_all(project_risk, guardrails, workflow_modules)
+        validate_artifact_schemas(artifact_schemas)
         if risk_calibration:
             validate_risk_calibration(risk_calibration)
     except (ConfigError, ValidationError) as exc:
@@ -198,12 +200,15 @@ def main(argv: list[str] | None = None) -> int:
 
     evidence = RepositoryAnalyzer(root).analyze(request, project_risk, intent=intent)
     risk = RiskEvaluator(project_risk, guardrails, risk_calibration).evaluate(evidence)
+    investigation = InvestigationQuestionComposer().compose(evidence, risk)
+    evidence["investigation_questions"] = investigation
     composer = WorkflowComposer(project_risk, workflow_modules)
     workflow = composer.compose(evidence, risk)
 
     dump_yaml(run_dir / "evidence-pack.yaml", evidence)
     dump_yaml(run_dir / "risk-assessment.yaml", risk)
     (run_dir / "risk-assessment.md").write_text(render_risk_markdown(risk), encoding="utf-8")
+    InvestigationQuestionComposer().write(run_dir, investigation)
     dump_yaml(run_dir / "workflow-recommendation.yaml", workflow)
     tracker = ProgressTracker(workflow_modules)
     tracker.initialize(run_dir, workflow["workflow_recommendation"].get("required_modules", []), current="code_fact_scan")

@@ -14,6 +14,8 @@ ARTIFACTS = [
     "evidence-pack.yaml",
     "risk-assessment.yaml",
     "risk-assessment.md",
+    "investigation-questions.yaml",
+    "investigation-questions.md",
     "workflow-recommendation.yaml",
     "workflow-plan.md",
     "progress.yaml",

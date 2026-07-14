@@ -10,7 +10,7 @@ PLUGIN="$ROOT/plugins/adaptive-change-governance"
 rsync -a --delete --exclude '__pycache__' "$ROOT/lib/" "$PLUGIN/lib/"
 rsync -a "$ROOT/bin/change-assess" "$PLUGIN/bin/change-assess"
 
-for name in assessment-schema workflow-modules artifact-schemas project-risk guardrails; do
+for name in assessment-schema workflow-modules artifact-schemas project-risk guardrails risk-calibration risk-scenarios; do
   rsync -a "$ROOT/.ai-governance/$name.yaml" "$PLUGIN/.ai-governance/$name.yaml"
 done
 

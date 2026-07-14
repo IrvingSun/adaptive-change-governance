@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "lib"))
 
 from adaptive_change_governance.config_loader import dump_yaml, load_yaml
 import adaptive_change_governance.cli as cli_module
+from adaptive_change_governance.artifact_context import apply_validated_artifacts
 from adaptive_change_governance.context_adjuster import apply_user_context
 from adaptive_change_governance.diff_verifier import DiffVerifier
 from adaptive_change_governance.human_review import HumanReviewGate, ReviewError
@@ -451,6 +452,73 @@ class Phase1Test(unittest.TestCase):
         self.assertIn("public_api", strong_adjusted["code_findings"]["change_types"])
         self.assertTrue(strong_adjusted["context_adjustments"]["conflicts"])
 
+    def test_validated_artifact_context_reduces_uncertainty_without_removing_strong_guardrails(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            dump_yaml(temp / "progress.yaml", {
+                "steps": [{
+                    "id": "dependency_analysis",
+                    "status": "done",
+                    "artifacts": ["dependency-analysis.yaml"],
+                }],
+            })
+            dump_yaml(temp / "artifact-validation-dependency_analysis.yaml", {
+                "status": "pass",
+                "artifact": "dependency-analysis.yaml",
+            })
+            dump_yaml(temp / "dependency-analysis.yaml", {
+                "module": "dependency_analysis",
+                "summary": "Only internal frontend consumers were found.",
+                "evidence": [{
+                    "path": "frontend/src/api/bot.js",
+                    "line": 64,
+                    "fact": "FACT: /iot-debug consumers are internal frontend calls only.",
+                    "confidence": "high",
+                }],
+            })
+            evidence = {
+                "version": 1,
+                "request": {"original": "移除公开接口", "request_goal": {"requires_code_change": True}},
+                "repository": {"branch": "unknown", "commit": "unknown"},
+                "code_findings": {
+                    "direct_files": [{"path": "app/api/iot_debug.py", "reason": "FACT: feature endpoint"}],
+                    "related_files": [],
+                    "affected_modules": ["app"],
+                    "affected_domains": ["public-interface"],
+                    "change_types": ["public_api"],
+                    "operations": [],
+                    "domain_evidence": [],
+                    "change_type_evidence": [{
+                        "value": "public_api",
+                        "source": "code_search",
+                        "path": "app/api/iot_debug.py",
+                        "keyword": "api",
+                        "strength": "strong",
+                        "fact": "FACT: endpoint file is in scope.",
+                    }],
+                    "operation_evidence": [],
+                    "database_changes": False,
+                    "message_schema_changes": False,
+                    "public_api_changes": True,
+                    "file_risk": {"highest_score": 3, "effective_score": 3},
+                    "feature_boundary": {"summary": {"confidence": "high", "ambiguous_important_files": 0}},
+                },
+                "test_findings": {"coverage_confidence": "low"},
+                "unknowns": ["UNKNOWN: external consumers must be confirmed."],
+                "evidence_sources": ["code_search"],
+            }
+            adjusted = apply_validated_artifacts(evidence, temp)
+            risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(adjusted)
+            self.assertIn("artifact_context", adjusted)
+            self.assertEqual("high", adjusted["artifact_context"]["artifacts"][0]["confidence"])
+            self.assertIn("validated_module_artifacts", adjusted["evidence_sources"])
+            self.assertEqual(evidence["unknowns"], adjusted["unknowns"])
+            self.assertIn("public-interface-change", risk["triggered_guardrails"])
+            uncertainty = next(item for item in risk["risk_explanation"]["dimension_explanations"] if item["dimension"] == "uncertainty")
+            self.assertIn("FACT: validated_artifact_confidence=high", uncertainty["evidence"])
+        finally:
+            shutil.rmtree(temp)
+
     def test_destructive_database_operation_cannot_drop_hard_gate(self):
         evidence = RepositoryAnalyzer(ROOT).analyze("删除重复的设备端口状态数据。", self.project_risk)
         risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)
@@ -627,8 +695,14 @@ class Phase1Test(unittest.TestCase):
             )
             self.assertEqual(execute_next.returncode, 3, execute_next.stderr + execute_next.stdout)
             self.assertIn("requires user confirmation", execute_next.stdout)
-            for artifact in ("evidence-pack.yaml", "risk-assessment.yaml", "risk-assessment.md", "workflow-plan.md"):
+            for artifact in ("evidence-pack.yaml", "risk-assessment.yaml", "risk-assessment.md", "investigation-questions.yaml", "investigation-questions.md", "workflow-plan.md"):
                 self.assertTrue((runs[0] / artifact).exists(), artifact)
+            evidence = load_yaml(runs[0] / "evidence-pack.yaml")
+            self.assertIn("investigation_questions", evidence)
+            self.assertTrue(evidence["investigation_questions"]["questions"])
+            investigation = load_yaml(runs[0] / "investigation-questions.yaml")
+            self.assertEqual("open", investigation["status"])
+            self.assertTrue(all(item.get("expected_artifact") for item in investigation["questions"]))
             risk_data = load_yaml(runs[0] / "risk-assessment.yaml")
             self.assertIn("risk_explanation", risk_data)
             self.assertTrue(risk_data["risk_explanation"]["dimension_explanations"])
@@ -644,10 +718,12 @@ class Phase1Test(unittest.TestCase):
             self.assertIsNotNone(progress["steps"][0]["duration_seconds"])
             review_md = (runs[0] / "review.md").read_text(encoding="utf-8")
             self.assertIn("Review Commands", review_md)
+            self.assertIn("Investigation Questions", review_md)
             self.assertNotIn("Editable File", review_md)
             self.assertNotIn("Edit `human-review.yaml`", review_md)
             self.assertFalse((runs[0] / "technical-plan.md").exists())
             workflow_plan = (runs[0] / "workflow-plan.md").read_text(encoding="utf-8")
+            self.assertIn("待调查问题", workflow_plan)
             self.assertIn("不得生成 technical-plan", workflow_plan)
         finally:
             shutil.rmtree(temp)
@@ -701,6 +777,17 @@ class Phase1Test(unittest.TestCase):
             self.assertTrue((run_dir / "approved-workflow-plan.md").exists())
             self.assertTrue((run_dir / ".workflow-approved").exists())
             self.assertFalse((run_dir / "technical-plan.md").exists())
+            next_action = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--next", run_dir.name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(next_action.returncode, 0, next_action.stderr + next_action.stdout)
+            self.assertIn("Recommended action: answer_investigation_question", next_action.stdout)
+            self.assertIn("Investigation questions:", next_action.stdout)
         finally:
             shutil.rmtree(temp)
 
@@ -855,6 +942,7 @@ class Phase1Test(unittest.TestCase):
             self.assertEqual(tasks.returncode, 0, tasks.stderr + tasks.stdout)
             artifact = load_yaml(run_dir / "agent-tasks.yaml")
             self.assertTrue(artifact["policy"]["subagents_required"])
+            self.assertTrue(artifact["investigation_questions"])
             task_ids = {task["id"] for task in artifact["tasks"]}
             self.assertIn("code_fact_scan", task_ids)
             self.assertIn("data_impact_analysis", task_ids)
@@ -863,6 +951,7 @@ class Phase1Test(unittest.TestCase):
             dependency_task = next(task for task in artifact["tasks"] if task["id"] == "dependency_analysis")
             self.assertIn("--complete-step", dependency_task["completion_command"])
             self.assertIn("--module dependency_analysis", dependency_task["completion_command"])
+            self.assertTrue(any("answer investigation question" in item for item in dependency_task["constraints"]))
             self.assertTrue((run_dir / "agent-tasks.md").exists())
 
             started = subprocess.run(
@@ -935,6 +1024,40 @@ class Phase1Test(unittest.TestCase):
                 "unknowns: []\n"
                 "evidence:\n"
                 "  - FACT: call graph checked\n",
+                encoding="utf-8",
+            )
+            vague_validation = subprocess.run(
+                [
+                    sys.executable,
+                    str(temp / "bin/change-assess"),
+                    "--validate-artifact",
+                    run_dir.name,
+                    "--module",
+                    "dependency_analysis",
+                    "--artifact",
+                    "dependency-analysis.yaml",
+                ],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(vague_validation.returncode, 3, vague_validation.stderr + vague_validation.stdout)
+            self.assertIn("evidence[0].path is required", vague_validation.stdout)
+            self.assertIn("evidence[0].line is required", vague_validation.stdout)
+            self.assertIn("evidence[0].confidence must be high, medium, or low", vague_validation.stdout)
+
+            (run_dir / "dependency-analysis.yaml").write_text(
+                "upstream: []\n"
+                "downstream: []\n"
+                "external_consumers: []\n"
+                "unknowns: []\n"
+                "evidence:\n"
+                "  - path: app/api/example.py\n"
+                "    line: 12\n"
+                "    fact: 'FACT: call graph checked'\n"
+                "    confidence: high\n",
                 encoding="utf-8",
             )
             validation = subprocess.run(

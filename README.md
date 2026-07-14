@@ -72,6 +72,8 @@ The command writes an isolated run under `.ai-governance/runs/`:
 - `evidence-pack.yaml`
 - `risk-assessment.yaml`
 - `risk-assessment.md`
+- `investigation-questions.yaml`
+- `investigation-questions.md`
 - `workflow-recommendation.yaml`
 - `workflow-plan.md`
 - `progress.yaml`
@@ -157,6 +159,16 @@ If `.ai-governance/artifact-schemas.yaml` defines a schema for the module, `--co
 
 ```bash
 bin/change-assess --validate-artifact <run_id> --module dependency_analysis --artifact dependency-analysis.yaml
+```
+
+For modules with strict evidence rules, artifact evidence must be structured:
+
+```yaml
+evidence:
+  - path: app/api/example.py
+    line: 12
+    fact: "FACT: caller references the changed endpoint"
+    confidence: high
 ```
 
 The technical-plan gate writes:

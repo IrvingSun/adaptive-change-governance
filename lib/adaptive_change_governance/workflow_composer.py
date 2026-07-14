@@ -108,13 +108,27 @@ class WorkflowComposer:
         lines.extend(f"- UNKNOWN: {item.replace('UNKNOWN: ', '')}" for item in evidence["unknowns"])
         lines.extend([
             "",
-            "## 11. 判断依据",
+            "## 11. 待调查问题",
+        ])
+        questions = evidence.get("investigation_questions", {}).get("questions", [])
+        if questions:
+            for item in questions:
+                lines.append(
+                    f"- DECISION: [{item.get('priority')}] {item.get('module')} -> "
+                    f"{item.get('expected_artifact')}; {item.get('question')}"
+                )
+                lines.append(f"  - {item.get('reason')}")
+        else:
+            lines.append("- DECISION: none")
+        lines.extend([
+            "",
+            "## 12. 判断依据",
         ])
         lines.extend(f"- {judgment}" for judgment in risk["judgments"])
         lines.extend(f"- {judgment}" for judgment in workflow["judgments"])
         lines.extend([
             "",
-            "## 12. 阶段边界",
+            "## 13. 阶段边界",
             "- DECISION: 在 workflow-plan 获得人工确认前，不得生成 technical-plan。",
             "- DECISION: 在 technical-plan 获得人工确认前，不得修改业务代码。",
         ])

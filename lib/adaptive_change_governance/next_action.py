@@ -36,6 +36,19 @@ class NextActionPlanner:
             return action
         if not (run_dir / ".workflow-approved").exists():
             return self._manual(action, "approve_workflow", f"change-assess --approve-workflow {run_dir.name}")
+        open_questions = self._open_investigation_questions(run_dir)
+        if open_questions:
+            first = open_questions[0]
+            action["recommended_action"] = "answer_investigation_question"
+            action["command"] = (
+                f"produce {first.get('expected_artifact')} for {first.get('module')}; "
+                f"then run change-assess --complete-step {run_dir.name} "
+                f"--module {first.get('module')} --artifact {first.get('expected_artifact')}"
+            )
+            action["requires_user_confirmation"] = False
+            action["can_execute"] = False
+            action["investigation_questions"] = open_questions
+            return action
         if not (run_dir / "agent-tasks.yaml").exists() and rec.get("final_level") in {"L3", "L4"}:
             return self._auto(action, "generate_agent_tasks", f"change-assess --generate-agent-tasks {run_dir.name}")
         if not (run_dir / "technical-plan.yaml").exists():
@@ -114,6 +127,18 @@ class NextActionPlanner:
             blockers.append("technical plan not approved")
         return blockers
 
+    def _open_investigation_questions(self, run_dir: Path) -> list[dict[str, Any]]:
+        artifact = self._load_if_exists(run_dir / "investigation-questions.yaml")
+        questions = []
+        for item in artifact.get("questions", []):
+            expected = item.get("expected_artifact")
+            if item.get("status") == "answered":
+                continue
+            if expected and (run_dir / expected).exists():
+                continue
+            questions.append(item)
+        return questions
+
     def render(self, plan: dict[str, Any]) -> str:
         lines = [
             "Next Action",
@@ -130,6 +155,11 @@ class NextActionPlanner:
             "Blockers:",
         ]
         lines.extend(f"  - {item}" for item in plan.get("blockers", []) or ["none"])
+        questions = plan.get("investigation_questions", [])
+        if questions:
+            lines.extend(["", "Investigation questions:"])
+            for item in questions[:5]:
+                lines.append(f"  - [{item.get('priority')}] {item.get('module')} -> {item.get('expected_artifact')}: {item.get('question')}")
         return "\n".join(lines) + "\n"
 
     def _blocked_action(self, action: dict[str, Any], blockers: list[str]) -> dict[str, Any]:

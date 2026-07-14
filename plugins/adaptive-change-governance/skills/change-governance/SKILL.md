@@ -25,6 +25,7 @@ Required behavior:
 - Distinguish inherent file risk from effective change risk. If the model classifies a high-risk file change as comment-only or docs-only, record that as intent and require later diff verification.
 - After implementation, run `change-assess --verify-diff <run_id>` before final handoff. Verification diffs against HEAD (staged changes included) and scans untracked files, so staging or leaving files untracked does not hide them. If it reports blocked, stop and present the blocking diff evidence.
 - Technical-plan approval is blocked while hard-guardrail analysis modules (such as business_rule_confirmation or threat_analysis) are unfinished; complete them with `change-assess --complete-step` and an artifact before `--approve-technical-plan`.
+- Treat `investigation-questions.yaml` as the bridge from Python UNKNOWNs to Agent investigation. After workflow approval, run `change-assess --next <run_id>`; if it recommends `answer_investigation_question`, produce the expected artifact with FACT/INFERENCE/UNKNOWN evidence before technical planning.
 - After implementation, run `change-assess --reassess <run_id>` and `change-assess --generate-verification-report <run_id>` before final handoff.
 - Stop after `workflow-plan.md` until human approval is present.
 - For `analysis_only` or `decision_support`, run `change-assess --generate-analysis-report <run_id>` and stop after presenting the analysis report unless the user opens a new implementation request.
@@ -37,6 +38,7 @@ Use `change-assess --status <run_id>` for a consolidated dashboard of current ga
 Use `change-assess --next <run_id>` to determine the next action. Use `--execute-next` only when the command reports no user confirmation is required.
 When a subagent completes a generated task, run that task's `completion_command` or call `change-assess --complete-step <run_id> --module <module> --artifact <artifact> --agent <agent>` so the status bar records completed state, elapsed time, and artifact path.
 If `.ai-governance/artifact-schemas.yaml` defines required fields for that module, artifact validation must pass before claiming the step is complete.
+For strict schemas, evidence must be a list of mappings with `path`, integer `line`, labeled `fact` (`FACT:`, `INFERENCE:`, `UNKNOWN:`, `WEAK SIGNAL:`, or `DECISION:`), and `confidence: high|medium|low`.
 Run artifacts in `.ai-governance/runs/` are local audit and gate-state files; keep them gitignored by default. Use `change-assess --cleanup-runs --cleanup-dry-run` before deleting old runs.
 
 ```bash

@@ -197,6 +197,7 @@ class RiskEvaluator:
         file_risk = code.get("file_risk", {})
         boundary = code.get("feature_boundary", {})
         boundary_summary = boundary.get("summary", {}) if isinstance(boundary, dict) else {}
+        artifact_context = evidence.get("artifact_context", {}) if isinstance(evidence.get("artifact_context"), dict) else {}
         unknowns = evidence.get("unknowns", [])
         inputs = {
             "business_criticality": [
@@ -219,6 +220,7 @@ class RiskEvaluator:
             "uncertainty": [
                 f"UNKNOWN: unknown_count={len(unknowns)}",
                 f"FACT: feature_boundary_confidence={boundary_summary.get('confidence', 'unknown')}",
+                f"FACT: validated_artifact_confidence={self._artifact_context_confidence(artifact_context)}",
             ],
             "reversibility": [
                 f"FACT: rollback capability comes from project-risk.yaml engineering_health.rollback_capability={self.project_risk.get('engineering_health', {}).get('rollback_capability', 'unknown')}",
@@ -294,9 +296,11 @@ class RiskEvaluator:
         code = evidence.get("code_findings", {})
         boundary = code.get("feature_boundary", {})
         summary = boundary.get("summary", {}) if isinstance(boundary, dict) else {}
+        artifact_context = evidence.get("artifact_context", {}) if isinstance(evidence.get("artifact_context"), dict) else {}
         trace = [
             f"FACT: feature boundary confidence={summary.get('confidence', 'unknown')}; confirmed_files={summary.get('confirmed_files', 0)}; ambiguous_important_files={summary.get('ambiguous_important_files', 0)}.",
             f"FACT: file risk inherent={code.get('file_risk', {}).get('highest_level', 'unknown')}; effective={code.get('file_risk', {}).get('effective_level', 'unknown')}.",
+            f"FACT: validated artifact context confidence={self._artifact_context_confidence(artifact_context)}.",
             f"FACT: strong guardrails={sorted(triggered_ids)}.",
         ]
         weak = [item.get("id") for item in details if item.get("strength") == "weak"]
@@ -321,6 +325,8 @@ class RiskEvaluator:
         boundary_summary = feature_boundary.get("summary", {}) if isinstance(feature_boundary.get("summary"), dict) else {}
         boundary_confidence = str(boundary_summary.get("confidence", "unknown"))
         ambiguous_important_files = int(boundary_summary.get("ambiguous_important_files", 0) or 0)
+        artifact_context = evidence.get("artifact_context", {}) if isinstance(evidence.get("artifact_context"), dict) else {}
+        artifact_confidence = self._artifact_context_confidence(artifact_context)
         critical_domains = set(self.project_risk.get("critical_domains", []))
         intrinsically_sensitive = {
             "financial-calculation",
@@ -365,6 +371,10 @@ class RiskEvaluator:
                 uncertainty = max(uncertainty, 3)
             if ambiguous_important_files:
                 uncertainty = max(uncertainty, 4)
+            if artifact_confidence == "high" and not ambiguous_important_files:
+                uncertainty = max(1, uncertainty - 1)
+            elif artifact_confidence == "medium" and uncertainty > 3:
+                uncertainty -= 1
             reversibility = 6 - max(1, int(engineering.get("rollback_capability", 3)))
             data_risk = max(1, int(business.get("data_integrity", 3))) if code.get("database_changes") else (3 if sensitive_change else 1)
             testability_risk = 5 if tests.get("coverage_confidence") == "low" else 3
@@ -400,6 +410,16 @@ class RiskEvaluator:
     def _has_security_domain(self, code: dict[str, Any]) -> bool:
         security = {"authentication", "authorization", "credential", "token"}
         return bool(security & set(code.get("affected_domains", [])))
+
+    def _artifact_context_confidence(self, artifact_context: dict[str, Any]) -> str:
+        values = {str(item.get("confidence", "")) for item in artifact_context.get("artifacts", []) if isinstance(item, dict)}
+        if "high" in values:
+            return "high"
+        if "medium" in values:
+            return "medium"
+        if "low" in values:
+            return "low"
+        return "unknown"
 
     def _level_from_score(self, score: float) -> str:
         thresholds = self._thresholds()

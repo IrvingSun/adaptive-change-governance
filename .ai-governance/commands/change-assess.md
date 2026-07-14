@@ -24,9 +24,19 @@ bin/change-assess "<需求描述>" --profile charging-platform
 8. 生成 `evidence-pack.yaml`。
 9. 应用硬风险围栏。
 10. 生成 `risk-assessment.yaml` 和 `risk-assessment.md`。
-11. 生成 `workflow-plan.md`。
-12. 生成 `review.md` 和 `human-review.yaml`。
-13. 停止，等待 `workflow_plan_approval`。
+11. 生成 `investigation-questions.yaml` 和 `investigation-questions.md`。
+12. 生成 `workflow-plan.md`。
+13. 生成 `review.md` 和 `human-review.yaml`。
+14. 停止，等待 `workflow_plan_approval`。
+
+工作流批准后先运行：
+
+```bash
+bin/change-assess --next <run_id>
+```
+
+如果返回 `answer_investigation_question`，需要先产出对应 artifact 并 `--complete-step`，再进入技术方案。
+严格 schema 的 artifact 证据必须使用结构化条目：`path`、整数 `line`、带标签的 `fact` 和 `confidence: high|medium|low`。
 
 风险校准回归：
 

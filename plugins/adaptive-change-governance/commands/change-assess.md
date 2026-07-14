@@ -59,7 +59,8 @@ After the command finishes:
 2. If `request_goal.type` is `analysis_only` or `decision_support`, run `change-assess --generate-analysis-report <run_id>` and present the report. Do not generate a technical plan or edit business code for that run.
 3. Otherwise, ask the user which decision or module changes they want.
 4. Do not generate a technical plan until workflow approval has succeeded.
-4. To approve with command-line changes, run:
+5. After workflow approval, run `change-assess --next <run_id>` before technical planning. If it returns `answer_investigation_question`, produce the requested artifact and complete the matching workflow step before moving on.
+6. To approve with command-line changes, run:
 
 ```bash
 change-assess --approve-workflow <run_id>
@@ -76,6 +77,7 @@ After workflow approval:
 
 ```bash
 change-assess --add-context <run_id> --include "scope item" --exclude "out of scope" --user-fact "confirmed fact"
+change-assess --next <run_id>
 change-assess --generate-analysis-report <run_id>
 change-assess --generate-agent-tasks <run_id>
 change-assess --propose-technical-plan <run_id>
@@ -98,6 +100,7 @@ change-assess --complete-step <run_id> --module dependency_analysis --artifact d
 ```
 
 If `.ai-governance/artifact-schemas.yaml` defines a schema for that module, `--complete-step` validates the artifact first. Blocked validation means the step must not be presented as complete.
+Strict schemas require `evidence` entries with `path`, integer `line`, labeled `fact`, and `confidence: high|medium|low`.
 
 For local run retention, use:
 

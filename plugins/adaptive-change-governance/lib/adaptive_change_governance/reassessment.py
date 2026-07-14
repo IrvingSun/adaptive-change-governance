@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .artifact_context import apply_validated_artifacts
 from .config_loader import dump_yaml, load_yaml
 from .context_adjuster import apply_user_context
 from .repository_analyzer import RepositoryAnalyzer
@@ -27,6 +28,7 @@ class ReassessmentRunner:
         request = initial_evidence.get("request", {}).get("original", "")
         intent = initial_evidence.get("request", {}).get("model_intent", {})
         post_evidence = RepositoryAnalyzer(self.root).analyze(request, self.project_risk, intent=intent)
+        post_evidence = apply_validated_artifacts(post_evidence, run_dir)
         context = load_yaml(run_dir / "run-context.yaml") if (run_dir / "run-context.yaml").exists() else {}
         post_evidence = apply_user_context(post_evidence, context)
         post_risk = RiskEvaluator(self.project_risk, self.guardrails, self.calibration).evaluate(post_evidence)
@@ -62,6 +64,11 @@ class ReassessmentRunner:
         lines.extend(["", "## Scope Diff"])
         for item in comparison.get("scope_diff", {}).get("new_direct_files", []) or ["none"]:
             lines.append(f"- FACT: new_direct_file={item}")
+        lines.extend(["", "## Artifact Context"])
+        context = comparison.get("artifact_context", {})
+        lines.append(f"- FACT: consumed={context.get('consumed', 0)}")
+        for item in context.get("artifacts", []) or ["none"]:
+            lines.append(f"- FACT: {item}")
         return "\n".join(lines) + "\n"
 
     def _compare(
@@ -112,5 +119,12 @@ class ReassessmentRunner:
                 "new_direct_files": sorted(path for path in (post_direct - initial_direct) if path),
                 "new_affected_domains": new_domains,
                 "new_change_types": new_change_types,
+            },
+            "artifact_context": {
+                "consumed": len(post_evidence.get("artifact_context", {}).get("artifacts", [])),
+                "artifacts": [
+                    f"{item.get('module')}:{item.get('artifact')} confidence={item.get('confidence')}"
+                    for item in post_evidence.get("artifact_context", {}).get("artifacts", [])
+                ],
             },
         }

@@ -113,6 +113,23 @@ def validate_risk_calibration(data: dict[str, Any]) -> None:
             raise ValidationError(f"risk-calibration.yaml.dimension_weight_overrides.{key} must be a positive number")
 
 
+def validate_artifact_schemas(data: dict[str, Any]) -> None:
+    if not data:
+        return
+    if data.get("version") != 1:
+        raise ValidationError("artifact-schemas.yaml version must be 1")
+    schemas = _require_mapping(data, "schemas", "artifact-schemas.yaml")
+    for module, schema in schemas.items():
+        if not isinstance(schema, dict):
+            raise ValidationError(f"artifact-schemas.yaml.schemas.{module} must be a mapping")
+        required = schema.get("required_fields", [])
+        if not isinstance(required, list):
+            raise ValidationError(f"artifact-schemas.yaml.schemas.{module}.required_fields must be a list")
+        for key in ("evidence_required", "evidence_path_line_required", "confidence_required"):
+            if key in schema and not isinstance(schema[key], bool):
+                raise ValidationError(f"artifact-schemas.yaml.schemas.{module}.{key} must be true or false")
+
+
 def validate_all(project_risk: dict[str, Any], guardrails: dict[str, Any], workflow_modules: dict[str, Any]) -> None:
     validate_project_risk(project_risk)
     validate_guardrails(guardrails)

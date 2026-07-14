@@ -9,6 +9,9 @@ schemas:
       - external_consumers
       - unknowns
       - evidence
+    evidence_required: true
+    evidence_path_line_required: true
+    confidence_required: true
   data_impact_analysis:
     description: Data impact analysis must identify operations, estimates, dry-run, rollback, and evidence.
     required_fields:
@@ -17,6 +20,9 @@ schemas:
       - dry_run
       - rollback
       - evidence
+    evidence_required: true
+    evidence_path_line_required: true
+    confidence_required: true
   adversarial_review:
     description: Adversarial review must challenge assumptions and surface failure modes.
     required_fields:
@@ -24,3 +30,7 @@ schemas:
       - failure_modes
       - blocking_findings
       - residual_risks
+      - evidence
+    evidence_required: true
+    evidence_path_line_required: true
+    confidence_required: true
