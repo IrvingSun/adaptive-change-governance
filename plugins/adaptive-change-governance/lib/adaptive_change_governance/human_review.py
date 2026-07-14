@@ -118,11 +118,16 @@ class HumanReviewGate:
         risk = load_yaml(run_dir / "risk-assessment.yaml")
         workflow = load_yaml(run_dir / "workflow-recommendation.yaml")
         rec = workflow["workflow_recommendation"]
+        goal = rec.get("request_goal", {})
         lines = [
             "Workflow Review",
             "",
             f"Run: {run_dir.name}",
             f"Request: {evidence['request']['original']}",
+            f"Request goal: {goal.get('type', 'implementation')}",
+            f"Requires code change: {goal.get('requires_code_change', 'unknown')}",
+            f"Current gate: {rec.get('default_stop_gate', 'workflow_plan_approval')}",
+            f"Suggested next action: {self._suggested_next_action(goal, rec)}",
             f"Final level: {rec['final_level']}",
             f"Triggered guardrails: {rec.get('triggered_guardrails', [])}",
             f"Weak guardrail candidates: {[item.get('id') for item in risk.get('weak_guardrail_candidates', [])]}",
@@ -159,6 +164,7 @@ class HumanReviewGate:
             "  - add user facts or corrections",
             "",
             "Commands:",
+            f"  change-assess --generate-analysis-report {run_dir.name}",
             f"  change-assess --approve-workflow {run_dir.name}",
             f"  change-assess --approve-workflow {run_dir.name} --add-required threat_analysis --add-required security_regression_test",
             f"  change-assess --approve-workflow {run_dir.name} --raise-level L4 --reason \"reason\"",
@@ -185,6 +191,14 @@ class HumanReviewGate:
             "Next gate: technical_plan_proposal",
         ])
         return "\n".join(lines) + "\n"
+
+    def _suggested_next_action(self, goal: dict[str, Any], rec: dict[str, Any]) -> str:
+        goal_type = goal.get("type", "implementation")
+        if goal_type in {"analysis_only", "decision_support"}:
+            return "generate analysis report and stop unless the user opens a new implementation request"
+        if goal_type == "planning_only":
+            return "approve workflow only if the user wants a technical plan"
+        return "review and approve workflow before technical planning"
 
     def update_review(
         self,

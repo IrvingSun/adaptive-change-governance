@@ -48,6 +48,12 @@ bin/change-assess "修改需求描述" --intent-file change-intent.yaml
 - `decision_support`: return a recommendation before the user decides; stop at `decision_ready`.
 - `planning_only`: produce a technical plan but do not edit code; stop at `technical_plan_approval`.
 
+For analysis-only or decision-support runs, generate the final analysis artifact:
+
+```bash
+bin/change-assess --generate-analysis-report <run_id>
+```
+
 Use the default industry-neutral profile for reusable governance. Use the optional charging profile when assessing charging platform changes:
 
 ```bash
@@ -62,6 +68,8 @@ The command writes an isolated run under `.ai-governance/runs/`:
 - `workflow-recommendation.yaml`
 - `workflow-plan.md`
 - `progress.yaml`
+- `analysis-report.yaml` when generated
+- `analysis-report.md` when generated
 - `review.md`
 - `human-review.yaml`
 

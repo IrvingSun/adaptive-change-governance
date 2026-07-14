@@ -54,8 +54,9 @@ After the command finishes:
 
 1. Run `change-assess --review-workflow <run_id>` and show the user the risk, guardrails, required modules, optional modules, unknowns, and available commands.
    The review output includes a Chinese progress status bar with colored step state, elapsed time, assigned agent, and artifact paths.
-2. Ask the user which decision or module changes they want.
-3. Do not generate a technical plan until workflow approval has succeeded.
+2. If `request_goal.type` is `analysis_only` or `decision_support`, run `change-assess --generate-analysis-report <run_id>` and present the report. Do not generate a technical plan or edit business code for that run.
+3. Otherwise, ask the user which decision or module changes they want.
+4. Do not generate a technical plan until workflow approval has succeeded.
 4. To approve with command-line changes, run:
 
 ```bash
@@ -70,6 +71,7 @@ After workflow approval:
 
 ```bash
 change-assess --add-context <run_id> --include "scope item" --exclude "out of scope" --user-fact "confirmed fact"
+change-assess --generate-analysis-report <run_id>
 change-assess --generate-agent-tasks <run_id>
 change-assess --propose-technical-plan <run_id>
 change-assess --review-technical-plan <run_id>

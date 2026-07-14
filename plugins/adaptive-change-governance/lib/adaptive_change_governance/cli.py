@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from .analysis_report import AnalysisReportGenerator, AnalysisReportError
 from .agent_tasks import AgentTaskComposer, AgentTaskError
 from .config_loader import ConfigError, dump_yaml, load_yaml
 from .human_review import HumanReviewGate, ReviewError
@@ -36,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--propose-technical-plan", help="Generate technical-plan.yaml/md after workflow approval")
     parser.add_argument("--review-technical-plan", help="Review technical plan coverage and approval commands")
     parser.add_argument("--approve-technical-plan", help="Approve a generated technical plan")
+    parser.add_argument("--generate-analysis-report", help="Generate analysis-report.yaml/md for an existing run id or run directory")
     parser.add_argument("--generate-agent-tasks", help="Generate agent-tasks.yaml/md after workflow approval")
     parser.add_argument("--review-agent-tasks", help="Print generated agent task plan")
     parser.add_argument("--start-step", help="Mark one workflow module as in progress for an existing run id or run directory")
@@ -106,6 +108,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.approve_technical_plan:
         return _approve_technical_plan(root, Path(args.output), args.approve_technical_plan, args, workflow_modules)
+
+    if args.generate_analysis_report:
+        return _generate_analysis_report(root, Path(args.output), args.generate_analysis_report, workflow_modules)
 
     if args.generate_agent_tasks:
         return _generate_agent_tasks(root, Path(args.output), args.generate_agent_tasks, workflow_modules)
@@ -315,6 +320,22 @@ def _approve_technical_plan(root: Path, output_root: Path, run_id: str, args: ar
         return 3
     print(f"Technical plan approved: {run_dir}")
     print(f"Gate command: change-assess --check-gate {run_dir.name} --stage implementation")
+    return 0
+
+
+def _generate_analysis_report(root: Path, output_root: Path, run_id: str, workflow_modules: dict) -> int:
+    run_dir = _resolve_run_dir(root, output_root, run_id)
+    if not run_dir.exists():
+        print(f"ERROR: run not found: {run_id}")
+        return 2
+    try:
+        report = AnalysisReportGenerator(workflow_modules).generate(run_dir)
+    except (ConfigError, AnalysisReportError) as exc:
+        print(f"ERROR: {exc}")
+        return 2
+    print(f"Analysis report generated: {run_dir / 'analysis-report.yaml'}")
+    print(f"Conclusion: {report.get('conclusion', {}).get('summary')}")
+    print(f"Stop gate: {report.get('request', {}).get('default_stop_gate')}")
     return 0
 
 

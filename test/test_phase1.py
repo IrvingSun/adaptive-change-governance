@@ -281,6 +281,34 @@ class Phase1Test(unittest.TestCase):
             self.assertIn("Request goal: analysis_only", assess.stdout)
             self.assertIn("Next gate: analysis_complete", assess.stdout)
             run_dir = next((temp / ".ai-governance/runs").iterdir())
+            review = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--review-workflow", run_dir.name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(review.returncode, 0, review.stderr + review.stdout)
+            self.assertIn("Current gate: analysis_complete", review.stdout)
+            self.assertIn("--generate-analysis-report", review.stdout)
+            report = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--generate-analysis-report", run_dir.name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(report.returncode, 0, report.stderr + report.stdout)
+            self.assertIn("Analysis report generated", report.stdout)
+            self.assertTrue((run_dir / "analysis-report.yaml").exists())
+            self.assertTrue((run_dir / "analysis-report.md").exists())
+            self.assertTrue((run_dir / ".analysis-complete").exists())
+            report_data = load_yaml(run_dir / "analysis-report.yaml")
+            self.assertEqual("analysis_only", report_data["request"]["goal"]["type"])
+            self.assertEqual("analysis_complete", report_data["request"]["default_stop_gate"])
+            self.assertIn("do not generate technical-plan", " ".join(report_data["recommended_next_actions"]))
             blocked = subprocess.run(
                 [sys.executable, str(temp / "bin/change-assess"), "--propose-technical-plan", run_dir.name],
                 cwd=temp,

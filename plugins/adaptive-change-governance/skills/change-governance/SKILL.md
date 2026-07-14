@@ -24,6 +24,7 @@ Required behavior:
 - Consider configured `file_risk` when explaining risk: small edits in database/auth/scheduler/API files can require heavier workflow than similar-sized UI text edits.
 - Distinguish inherent file risk from effective change risk. If the model classifies a high-risk file change as comment-only or docs-only, record that as intent and require later diff verification.
 - Stop after `workflow-plan.md` until human approval is present.
+- For `analysis_only` or `decision_support`, run `change-assess --generate-analysis-report <run_id>` and stop after presenting the analysis report unless the user opens a new implementation request.
 - Do not generate a technical plan before workflow approval.
 - Do not modify business code before technical-plan approval and implementation gate check.
 
@@ -36,6 +37,7 @@ Run artifacts in `.ai-governance/runs/` are local audit and gate-state files; ke
 change-assess --review-workflow <run_id>
 change-assess --approve-workflow <run_id> --add-required threat_analysis
 change-assess --add-context <run_id> --include "scope item" --exclude "out of scope" --user-fact "confirmed fact"
+change-assess --generate-analysis-report <run_id>
 change-assess --generate-agent-tasks <run_id>
 change-assess --propose-technical-plan <run_id>
 change-assess --review-technical-plan <run_id>
