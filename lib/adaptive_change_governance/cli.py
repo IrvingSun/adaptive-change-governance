@@ -13,6 +13,7 @@ from .config_loader import ConfigError, dump_yaml, load_yaml
 from .diff_verifier import DiffVerifier, DiffVerificationError
 from .human_review import HumanReviewGate, ReviewError
 from .intent_model import load_intent_file
+from .next_action import NextActionPlanner
 from .progress import ProgressTracker
 from .repository_analyzer import RepositoryAnalyzer
 from .risk_evaluator import RiskEvaluator
@@ -37,6 +38,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-id")
     parser.add_argument("--review-workflow", help="Print workflow review options for an existing run id or run directory")
     parser.add_argument("--status", help="Print a run status dashboard for an existing run id or run directory")
+    parser.add_argument("--next", help="Print or safely execute the next recommended action for an existing run")
+    parser.add_argument("--execute-next", action="store_true", help="Execute the next action only when it does not require user confirmation")
     parser.add_argument("--approve-workflow", help="Approve workflow for an existing run id or run directory")
     parser.add_argument("--review-decision", help="Set review decision for an existing run id or run directory")
     parser.add_argument("--propose-technical-plan", help="Generate technical-plan.yaml/md after workflow approval")
@@ -101,6 +104,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.status:
         return _status(root, Path(args.output), args.status, workflow_modules)
+
+    if args.next:
+        return _next(root, Path(args.output), args.next, args, workflow_modules)
 
     if args.review_decision:
         return _review_decision(root, Path(args.output), args.review_decision, args, workflow_modules)
@@ -210,6 +216,33 @@ def _status(root: Path, output_root: Path, run_id: str, workflow_modules: dict) 
         return 2
     print(RunStatusRenderer(workflow_modules).render(run_dir), end="")
     return 0
+
+
+def _next(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, workflow_modules: dict) -> int:
+    run_dir = _resolve_run_dir(root, output_root, run_id)
+    if not run_dir.exists():
+        print(f"ERROR: run not found: {run_id}")
+        return 2
+    planner = NextActionPlanner()
+    plan = planner.plan(run_dir)
+    print(planner.render(plan), end="")
+    if not args.execute_next:
+        return 0
+    if plan.get("requires_user_confirmation"):
+        print("BLOCKED: next action requires user confirmation")
+        return 3
+    if not plan.get("can_execute"):
+        print("BLOCKED: next action cannot be executed automatically")
+        return 3
+    action = plan.get("recommended_action")
+    if action == "generate_analysis_report":
+        return _generate_analysis_report(root, output_root, run_id, workflow_modules)
+    if action == "generate_agent_tasks":
+        return _generate_agent_tasks(root, output_root, run_id, workflow_modules)
+    if action == "propose_technical_plan":
+        return _propose_technical_plan(root, output_root, run_id, workflow_modules)
+    print("BLOCKED: unsupported automatic next action")
+    return 3
 
 
 def _review_decision(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, workflow_modules: dict) -> int:

@@ -292,6 +292,31 @@ class Phase1Test(unittest.TestCase):
             self.assertEqual(review.returncode, 0, review.stderr + review.stdout)
             self.assertIn("Current gate: analysis_complete", review.stdout)
             self.assertIn("--generate-analysis-report", review.stdout)
+            next_action = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--next", run_dir.name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(next_action.returncode, 0, next_action.stderr + next_action.stdout)
+            self.assertIn("Requires user confirmation: no", next_action.stdout)
+            self.assertIn("Recommended action: generate_analysis_report", next_action.stdout)
+            next_execute = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--next", run_dir.name, "--execute-next"],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(next_execute.returncode, 0, next_execute.stderr + next_execute.stdout)
+            self.assertIn("Analysis report generated", next_execute.stdout)
+            self.assertTrue((run_dir / "analysis-report.yaml").exists())
+            (run_dir / "analysis-report.yaml").unlink()
+            (run_dir / "analysis-report.md").unlink()
+            (run_dir / ".analysis-complete").unlink()
             report = subprocess.run(
                 [sys.executable, str(temp / "bin/change-assess"), "--generate-analysis-report", run_dir.name],
                 cwd=temp,
@@ -476,6 +501,28 @@ class Phase1Test(unittest.TestCase):
             self.assertIn("Current gate: workflow_plan_approval", status.stdout)
             self.assertIn("workflow not approved", status.stdout)
             self.assertIn("change-assess --approve-workflow", status.stdout)
+            next_action = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--next", runs[0].name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(next_action.returncode, 0, next_action.stderr + next_action.stdout)
+            self.assertIn("Next Action", next_action.stdout)
+            self.assertIn("Requires user confirmation: yes", next_action.stdout)
+            self.assertIn("Recommended action: approve_workflow", next_action.stdout)
+            execute_next = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--next", runs[0].name, "--execute-next"],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(execute_next.returncode, 3, execute_next.stderr + execute_next.stdout)
+            self.assertIn("requires user confirmation", execute_next.stdout)
             for artifact in ("evidence-pack.yaml", "risk-assessment.yaml", "workflow-plan.md"):
                 self.assertTrue((runs[0] / artifact).exists(), artifact)
             for artifact in ("review.md", "human-review.yaml"):

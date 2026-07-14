@@ -32,6 +32,7 @@ Required behavior:
 Use command-line review and approval. Do not ask users to manually edit `human-review.yaml`; it is an audit file.
 When showing workflow review, include the Chinese progress status bar so the user can see 未执行 / 执行中 / 已执行 and elapsed time per completed step.
 Use `change-assess --status <run_id>` for a consolidated dashboard of current gate, artifacts, blockers, and next commands.
+Use `change-assess --next <run_id>` to determine the next action. Use `--execute-next` only when the command reports no user confirmation is required.
 When a subagent completes a generated task, run that task's `completion_command` or call `change-assess --complete-step <run_id> --module <module> --artifact <artifact> --agent <agent>` so the status bar records completed state, elapsed time, and artifact path.
 If `.ai-governance/artifact-schemas.yaml` defines required fields for that module, artifact validation must pass before claiming the step is complete.
 Run artifacts in `.ai-governance/runs/` are local audit and gate-state files; keep them gitignored by default. Use `change-assess --cleanup-runs --cleanup-dry-run` before deleting old runs.
@@ -39,6 +40,8 @@ Run artifacts in `.ai-governance/runs/` are local audit and gate-state files; ke
 ```bash
 change-assess --review-workflow <run_id>
 change-assess --status <run_id>
+change-assess --next <run_id>
+change-assess --next <run_id> --execute-next
 change-assess --approve-workflow <run_id> --add-required threat_analysis
 change-assess --add-context <run_id> --include "scope item" --exclude "out of scope" --user-fact "confirmed fact"
 change-assess --generate-analysis-report <run_id>
