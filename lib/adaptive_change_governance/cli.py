@@ -16,6 +16,7 @@ from .intent_model import load_intent_file
 from .progress import ProgressTracker
 from .repository_analyzer import RepositoryAnalyzer
 from .risk_evaluator import RiskEvaluator
+from .run_status import RunStatusRenderer
 from .run_retention import cleanup_runs, render_cleanup_summary
 from .schema_validator import ValidationError, validate_all
 from .technical_plan import TechnicalPlanError, TechnicalPlanGate
@@ -35,6 +36,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", default=".ai-governance/runs")
     parser.add_argument("--run-id")
     parser.add_argument("--review-workflow", help="Print workflow review options for an existing run id or run directory")
+    parser.add_argument("--status", help="Print a run status dashboard for an existing run id or run directory")
     parser.add_argument("--approve-workflow", help="Approve workflow for an existing run id or run directory")
     parser.add_argument("--review-decision", help="Set review decision for an existing run id or run directory")
     parser.add_argument("--propose-technical-plan", help="Generate technical-plan.yaml/md after workflow approval")
@@ -96,6 +98,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.review_workflow:
         return _review_workflow(root, Path(args.output), args.review_workflow, workflow_modules)
+
+    if args.status:
+        return _status(root, Path(args.output), args.status, workflow_modules)
 
     if args.review_decision:
         return _review_decision(root, Path(args.output), args.review_decision, args, workflow_modules)
@@ -195,6 +200,15 @@ def _review_workflow(root: Path, output_root: Path, run_id: str, workflow_module
     except (ConfigError, ReviewError) as exc:
         print(f"ERROR: {exc}")
         return 2
+    return 0
+
+
+def _status(root: Path, output_root: Path, run_id: str, workflow_modules: dict) -> int:
+    run_dir = _resolve_run_dir(root, output_root, run_id)
+    if not run_dir.exists():
+        print(f"ERROR: run not found: {run_id}")
+        return 2
+    print(RunStatusRenderer(workflow_modules).render(run_dir), end="")
     return 0
 
 

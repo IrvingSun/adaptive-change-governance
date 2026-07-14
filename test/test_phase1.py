@@ -463,6 +463,19 @@ class Phase1Test(unittest.TestCase):
             self.assertIn("Review command: change-assess --review-workflow", result.stdout)
             runs = list((temp / ".ai-governance/runs").iterdir())
             self.assertEqual(1, len(runs))
+            status = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--status", runs[0].name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(status.returncode, 0, status.stderr + status.stdout)
+            self.assertIn("Run Status", status.stdout)
+            self.assertIn("Current gate: workflow_plan_approval", status.stdout)
+            self.assertIn("workflow not approved", status.stdout)
+            self.assertIn("change-assess --approve-workflow", status.stdout)
             for artifact in ("evidence-pack.yaml", "risk-assessment.yaml", "workflow-plan.md"):
                 self.assertTrue((runs[0] / artifact).exists(), artifact)
             for artifact in ("review.md", "human-review.yaml"):
@@ -744,6 +757,18 @@ class Phase1Test(unittest.TestCase):
             invalid_dependency_step = next(step for step in invalid_progress["steps"] if step["id"] == "dependency_analysis")
             self.assertEqual("blocked", invalid_dependency_step["status"])
             self.assertTrue((run_dir / "artifact-validation-dependency_analysis.yaml").exists())
+            blocked_status = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--status", run_dir.name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(blocked_status.returncode, 0, blocked_status.stderr + blocked_status.stdout)
+            self.assertIn("artifact-validation-dependency_analysis.yaml blocked", blocked_status.stdout)
+            self.assertIn("workflow step blocked: dependency_analysis", blocked_status.stdout)
+            self.assertIn("--validate-artifact", blocked_status.stdout)
 
             (run_dir / "dependency-analysis.yaml").write_text(
                 "upstream: []\n"

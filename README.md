@@ -77,12 +77,15 @@ The tool stops at `workflow_plan_approval`. Review and approve from the CLI:
 
 ```bash
 bin/change-assess --review-workflow <run_id>
+bin/change-assess --status <run_id>
 bin/change-assess --approve-workflow <run_id>
 bin/change-assess --approve-workflow <run_id> --add-required threat_analysis
 bin/change-assess --review-decision <run_id> --decision reassess --comment "needs dependency analysis"
 ```
 
 `--review-workflow` prints a Chinese progress status bar. Each step shows `未执行` / `执行中` / `已执行` / `已阻塞`, with terminal colors, elapsed time for completed steps, assigned agent, and produced artifacts when available.
+
+`--status` prints a run dashboard with request goal, current gate, generated artifacts, blockers, the progress status bar, and suggested next commands.
 
 Approval writes:
 

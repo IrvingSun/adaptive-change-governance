@@ -54,6 +54,7 @@ After the command finishes:
 
 1. Run `change-assess --review-workflow <run_id>` and show the user the risk, guardrails, required modules, optional modules, unknowns, and available commands.
    The review output includes a Chinese progress status bar with colored step state, elapsed time, assigned agent, and artifact paths.
+   Use `change-assess --status <run_id>` whenever the user asks where the run currently stands.
 2. If `request_goal.type` is `analysis_only` or `decision_support`, run `change-assess --generate-analysis-report <run_id>` and present the report. Do not generate a technical plan or edit business code for that run.
 3. Otherwise, ask the user which decision or module changes they want.
 4. Do not generate a technical plan until workflow approval has succeeded.
@@ -63,6 +64,7 @@ After the command finishes:
 change-assess --approve-workflow <run_id>
 change-assess --approve-workflow <run_id> --add-required threat_analysis
 change-assess --approve-workflow <run_id> --raise-level L4 --reason "reason"
+change-assess --status <run_id>
 ```
 
 Use `change-assess --review-decision <run_id> --decision reassess --comment "reason"` when the user requests reassessment instead of approval.
