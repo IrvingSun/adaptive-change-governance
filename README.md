@@ -49,6 +49,7 @@ The command writes an isolated run under `.ai-governance/runs/`:
 - `risk-assessment.yaml`
 - `workflow-recommendation.yaml`
 - `workflow-plan.md`
+- `progress.yaml`
 - `review.md`
 - `human-review.yaml`
 
@@ -60,6 +61,8 @@ bin/change-assess --approve-workflow <run_id>
 bin/change-assess --approve-workflow <run_id> --add-required threat_analysis
 bin/change-assess --review-decision <run_id> --decision reassess --comment "needs dependency analysis"
 ```
+
+`--review-workflow` prints a Chinese progress status bar. Each step shows `未执行` / `执行中` / `已执行` / `已阻塞`, with terminal colors and elapsed time for completed steps.
 
 Approval writes:
 

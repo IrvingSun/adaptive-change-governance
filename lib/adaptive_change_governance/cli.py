@@ -10,6 +10,7 @@ from .agent_tasks import AgentTaskComposer, AgentTaskError
 from .config_loader import ConfigError, dump_yaml, load_yaml
 from .human_review import HumanReviewGate, ReviewError
 from .intent_model import load_intent_file
+from .progress import ProgressTracker
 from .repository_analyzer import RepositoryAnalyzer
 from .risk_evaluator import RiskEvaluator
 from .run_retention import cleanup_runs, render_cleanup_summary
@@ -139,6 +140,9 @@ def main(argv: list[str] | None = None) -> int:
     dump_yaml(run_dir / "evidence-pack.yaml", evidence)
     dump_yaml(run_dir / "risk-assessment.yaml", risk)
     dump_yaml(run_dir / "workflow-recommendation.yaml", workflow)
+    tracker = ProgressTracker(workflow_modules)
+    tracker.initialize(run_dir, workflow["workflow_recommendation"].get("required_modules", []), current="code_fact_scan")
+    tracker.mark_done(run_dir, "code_fact_scan")
     (run_dir / "workflow-plan.md").write_text(composer.render_markdown(evidence, risk, workflow), encoding="utf-8")
     HumanReviewGate(workflow_modules).write_review_files(run_dir, evidence, risk, workflow)
 
@@ -212,6 +216,7 @@ def _approve_workflow(root: Path, output_root: Path, run_id: str, args: argparse
             comment=args.comment,
         )
         approved = gate.approve_workflow(run_dir, project_risk)
+        ProgressTracker(workflow_modules).mark_current(run_dir, "technical_design")
     except (ConfigError, ReviewError) as exc:
         print(f"BLOCKED: {exc}")
         return 3
@@ -254,6 +259,8 @@ def _propose_technical_plan(root: Path, output_root: Path, run_id: str, workflow
         return 2
     try:
         plan = TechnicalPlanGate(workflow_modules).propose(run_dir)
+        ProgressTracker(workflow_modules).mark_done(run_dir, "technical_design")
+        ProgressTracker(workflow_modules).mark_current(run_dir, "test_design")
     except (ConfigError, TechnicalPlanError) as exc:
         print(f"BLOCKED: {exc}")
         return 3
@@ -284,6 +291,7 @@ def _approve_technical_plan(root: Path, output_root: Path, run_id: str, args: ar
         return 2
     try:
         TechnicalPlanGate(workflow_modules).approve(run_dir, reviewer=args.reviewer)
+        ProgressTracker(workflow_modules).mark_done(run_dir, "test_design")
     except (ConfigError, TechnicalPlanError) as exc:
         print(f"BLOCKED: {exc}")
         return 3
@@ -331,6 +339,8 @@ def _check_gate(root: Path, output_root: Path, run_id: str, args: argparse.Names
     if errors:
         print("BLOCKED: " + "; ".join(errors))
         return 3
+    if stage == "implementation":
+        ProgressTracker(workflow_modules).mark_current(run_dir, "regression_test")
     print(f"GATE OK: {stage} may start")
     return 0
 

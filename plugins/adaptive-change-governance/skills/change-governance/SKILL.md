@@ -27,6 +27,7 @@ Required behavior:
 - Do not modify business code before technical-plan approval and implementation gate check.
 
 Use command-line review and approval. Do not ask users to manually edit `human-review.yaml`; it is an audit file.
+When showing workflow review, include the Chinese progress status bar so the user can see 未执行 / 执行中 / 已执行 and elapsed time per completed step.
 Run artifacts in `.ai-governance/runs/` are local audit and gate-state files; keep them gitignored by default. Use `change-assess --cleanup-runs --cleanup-dry-run` before deleting old runs.
 
 ```bash

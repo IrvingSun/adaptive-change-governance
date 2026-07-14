@@ -41,6 +41,7 @@ change-assess "$ARGUMENTS" --intent-file <intent-file>
 After the command finishes:
 
 1. Run `change-assess --review-workflow <run_id>` and show the user the risk, guardrails, required modules, optional modules, unknowns, and available commands.
+   The review output includes a Chinese progress status bar with colored step state and elapsed time.
 2. Ask the user which decision or module changes they want.
 3. Do not generate a technical plan until workflow approval has succeeded.
 4. To approve with command-line changes, run:

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .config_loader import dump_yaml, load_yaml
+from .progress import ProgressTracker
 from .workflow_composer import LEVEL_MODULES, WorkflowComposer
 
 
@@ -126,6 +127,8 @@ class HumanReviewGate:
             f"Triggered guardrails: {rec.get('triggered_guardrails', [])}",
             f"Weak guardrail candidates: {[item.get('id') for item in risk.get('weak_guardrail_candidates', [])]}",
             f"Prohibited actions: {rec.get('prohibited', [])}",
+            "",
+            ProgressTracker(self.workflow_modules).render(run_dir, color=True).rstrip(),
             "",
             "Guardrail evidence:",
         ]
