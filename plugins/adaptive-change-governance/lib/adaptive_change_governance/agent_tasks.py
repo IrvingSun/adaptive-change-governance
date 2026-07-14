@@ -24,7 +24,7 @@ class AgentTaskComposer:
         rec = approved["workflow_recommendation"]
         final_level = rec.get("final_level", "L1")
         required = rec.get("required_modules", [])
-        tasks = self._tasks_for_level(final_level, required)
+        tasks = self._tasks_for_level(final_level, required, run_dir.name)
         artifact = {
             "version": 1,
             "run_id": run_dir.name,
@@ -57,6 +57,7 @@ class AgentTaskComposer:
                 f"- agent: {task['agent']}",
                 f"- mode: {task['mode']}",
                 f"- output: {task['output']}",
+                f"- completion_command: `{task['completion_command']}`",
                 "- constraints:",
             ])
             lines.extend(f"  - {item}" for item in task.get("constraints", []))
@@ -74,7 +75,7 @@ class AgentTaskComposer:
             ],
         }
 
-    def _tasks_for_level(self, final_level: str, required: list[str]) -> list[dict[str, Any]]:
+    def _tasks_for_level(self, final_level: str, required: list[str], run_id: str) -> list[dict[str, Any]]:
         tasks = []
         if final_level in {"L1", "L2"}:
             tasks.append(self._task(
@@ -83,23 +84,24 @@ class AgentTaskComposer:
                 "read_only",
                 "code-fact-report.yaml",
                 ["confirm touched files and whether change remains within approved scope"],
+                run_id,
             ))
             if final_level == "L2":
-                tasks.append(self._task("technical_plan_review", "technical-plan-reviewer", "review_only", "technical-plan-review.yaml", ["check required module coverage before approval"]))
+                tasks.append(self._task("technical_plan_review", "technical-plan-reviewer", "review_only", "technical-plan-review.yaml", ["check required module coverage before approval"], run_id))
             return tasks
 
-        tasks.append(self._task("code_fact_scan", "code-fact-scanner", "read_only", "code-fact-report.yaml", ["identify relevant files, line references, and generated artifacts", "do not propose implementation"]))
+        tasks.append(self._task("code_fact_scan", "code-fact-scanner", "read_only", "code-fact-report.yaml", ["identify relevant files, line references, and generated artifacts", "do not propose implementation"], run_id))
         if "dependency_analysis" in required or "consumer_analysis" in required:
-            tasks.append(self._task("dependency_analysis", "dependency-analyzer", "read_only", "dependency-analysis.yaml", ["identify upstream/downstream callers and consumers", "mark dynamic or implicit dependencies as UNKNOWN"]))
+            tasks.append(self._task("dependency_analysis", "dependency-analyzer", "read_only", "dependency-analysis.yaml", ["identify upstream/downstream callers and consumers", "mark dynamic or implicit dependencies as UNKNOWN"], run_id))
         if any(module in required for module in ("data_impact_analysis", "dry_run", "affected_row_estimation", "backup_or_restore_plan")):
-            tasks.append(self._task("data_impact_analysis", "data-impact-reviewer", "read_only", "data-impact-review.yaml", ["identify data operations, dry-run query, affected row estimate, and rollback evidence", "do not execute production data changes"]))
+            tasks.append(self._task("data_impact_analysis", "data-impact-reviewer", "read_only", "data-impact-review.yaml", ["identify data operations, dry-run query, affected row estimate, and rollback evidence", "do not execute production data changes"], run_id))
         if "adversarial_review" in required or final_level == "L4":
-            tasks.append(self._task("adversarial_review", "adversarial-reviewer", "review_only", "adversarial-review.yaml", ["look for shared-module deletion, missing consumers, violated prohibited actions, and weak assumptions"]))
-        tasks.append(self._task("technical_plan_review", "technical-plan-reviewer", "review_only", "technical-plan-review.yaml", ["verify every required module has evidence or decision", "verify hard guardrails are not downgraded"]))
-        tasks.append(self._task("implementation_gate", "implementation-agent", "implementation_after_gate_only", "implementation-report.yaml", ["run change-assess --check-gate <run_id> --stage implementation before edits", "only implement approved technical plan scope"]))
+            tasks.append(self._task("adversarial_review", "adversarial-reviewer", "review_only", "adversarial-review.yaml", ["look for shared-module deletion, missing consumers, violated prohibited actions, and weak assumptions"], run_id))
+        tasks.append(self._task("technical_plan_review", "technical-plan-reviewer", "review_only", "technical-plan-review.yaml", ["verify every required module has evidence or decision", "verify hard guardrails are not downgraded"], run_id))
+        tasks.append(self._task("implementation_gate", "implementation-agent", "implementation_after_gate_only", "implementation-report.yaml", ["run change-assess --check-gate <run_id> --stage implementation before edits", "only implement approved technical plan scope"], run_id))
         return tasks
 
-    def _task(self, task_id: str, agent: str, mode: str, output: str, constraints: list[str]) -> dict[str, Any]:
+    def _task(self, task_id: str, agent: str, mode: str, output: str, constraints: list[str], run_id: str) -> dict[str, Any]:
         return {
             "id": task_id,
             "agent": agent,
@@ -112,5 +114,6 @@ class AgentTaskComposer:
                 "technical-plan.yaml if present",
             ],
             "output": output,
+            "completion_command": f"change-assess --complete-step {run_id} --module {task_id} --artifact {output} --agent {agent}",
             "constraints": constraints,
         }

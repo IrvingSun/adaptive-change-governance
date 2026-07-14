@@ -1,7 +1,7 @@
 {
   "name": "adaptive-change-governance",
   "description": "Assess change risk, compose workflow gates, and collect human approval before technical planning or implementation.",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "author": {
     "name": "Adaptive Change Governance Maintainers"
   },

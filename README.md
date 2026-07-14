@@ -62,7 +62,7 @@ bin/change-assess --approve-workflow <run_id> --add-required threat_analysis
 bin/change-assess --review-decision <run_id> --decision reassess --comment "needs dependency analysis"
 ```
 
-`--review-workflow` prints a Chinese progress status bar. Each step shows `未执行` / `执行中` / `已执行` / `已阻塞`, with terminal colors and elapsed time for completed steps.
+`--review-workflow` prints a Chinese progress status bar. Each step shows `未执行` / `执行中` / `已执行` / `已阻塞`, with terminal colors, elapsed time for completed steps, assigned agent, and produced artifacts when available.
 
 Approval writes:
 
@@ -103,6 +103,12 @@ bin/change-assess --check-gate <run_id> --stage implementation
 ```
 
 For L3/L4 workflows, `agent-tasks.yaml` marks subagents as required. The task plan separates read-only fact gathering, dependency/data impact review, adversarial review, technical-plan review, and implementation-after-gate work. Subagents must cite evidence and may not edit business code unless assigned implementation mode after `GATE OK`.
+
+Each generated agent task includes a `completion_command`. After a subagent finishes a step such as `dependency_analysis`, run that command to mark the workflow step as completed and record elapsed time, agent name, and artifact path:
+
+```bash
+bin/change-assess --complete-step <run_id> --module dependency_analysis --artifact dependency-analysis.yaml --agent dependency-analyzer
+```
 
 The technical-plan gate writes:
 

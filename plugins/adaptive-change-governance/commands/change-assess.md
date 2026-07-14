@@ -41,7 +41,7 @@ change-assess "$ARGUMENTS" --intent-file <intent-file>
 After the command finishes:
 
 1. Run `change-assess --review-workflow <run_id>` and show the user the risk, guardrails, required modules, optional modules, unknowns, and available commands.
-   The review output includes a Chinese progress status bar with colored step state and elapsed time.
+   The review output includes a Chinese progress status bar with colored step state, elapsed time, assigned agent, and artifact paths.
 2. Ask the user which decision or module changes they want.
 3. Do not generate a technical plan until workflow approval has succeeded.
 4. To approve with command-line changes, run:
@@ -67,6 +67,12 @@ change-assess --check-gate <run_id> --stage implementation
 
 Do not modify business code until the implementation gate returns `GATE OK`.
 
+When a subagent finishes a generated task, run that task's `completion_command`. For example:
+
+```bash
+change-assess --complete-step <run_id> --module dependency_analysis --artifact dependency-analysis.yaml --agent dependency-analyzer
+```
+
 For local run retention, use:
 
 ```bash
@@ -87,6 +93,7 @@ Hard constraints:
 - File importance from `file_risk` must influence routing: database, auth, migration, scheduler, and API files are higher impact than UI copy files even when the diff size is similar.
 - Distinguish inherent file importance from effective change risk. A comment-only change in a high-risk file may stay lightweight only when structured intent says `change_nature: comment_only`, and the implementation diff must later prove that no executable behavior changed.
 - For L3/L4 workflows, generate `agent-tasks.yaml` and use subagents for narrow read-only or review-only tasks before implementation.
+- Subagents must report completed workflow modules with `change-assess --complete-step`; the progress status bar must show completed state, elapsed time, and artifact path.
 - Workflow approval must happen before technical planning.
 - Technical-plan approval must happen before business-code edits.
 - Implementation must be preceded by `change-assess --check-gate <run_id> --stage implementation`.

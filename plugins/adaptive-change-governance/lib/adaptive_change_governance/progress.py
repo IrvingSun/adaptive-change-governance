@@ -41,6 +41,9 @@ class ProgressTracker:
                 "started_at": now if status == "in_progress" else "",
                 "completed_at": "",
                 "duration_seconds": None,
+                "agent": "",
+                "artifacts": [],
+                "notes": [],
             })
         data = {
             "version": 1,
@@ -50,31 +53,61 @@ class ProgressTracker:
         self._save(run_dir, data)
         return data
 
-    def mark_done(self, run_dir: Path, module: str) -> dict[str, Any]:
+    def mark_done(
+        self,
+        run_dir: Path,
+        module: str,
+        *,
+        artifacts: list[str] | None = None,
+        agent: str | None = None,
+        notes: list[str] | None = None,
+        strict: bool = True,
+    ) -> dict[str, Any]:
         data = self._load(run_dir)
         now = _now()
+        found = False
         for step in data.get("steps", []):
             if step.get("id") != module:
                 continue
+            found = True
             if not step.get("started_at"):
                 step["started_at"] = now
             step["status"] = "done"
             step["completed_at"] = now
             step["duration_seconds"] = _duration_seconds(step.get("started_at"), now)
+            self._merge_metadata(step, artifacts=artifacts, agent=agent, notes=notes)
+        if not found and strict:
+            raise ValueError(f"workflow module is not in progress tracker: {module}")
         data["updated_at"] = now
         self._save(run_dir, data)
         return data
 
-    def mark_current(self, run_dir: Path, module: str) -> dict[str, Any]:
+    def mark_current(
+        self,
+        run_dir: Path,
+        module: str,
+        *,
+        agent: str | None = None,
+        notes: list[str] | None = None,
+        strict: bool = True,
+    ) -> dict[str, Any]:
         data = self._load(run_dir)
         now = _now()
+        found = False
         for step in data.get("steps", []):
             if step.get("status") == "in_progress" and step.get("id") != module:
                 step["status"] = "pending"
                 step["started_at"] = ""
             if step.get("id") == module and step.get("status") != "done":
+                found = True
                 step["status"] = "in_progress"
                 step["started_at"] = step.get("started_at") or now
+                self._merge_metadata(step, agent=agent, notes=notes)
+            elif step.get("id") == module:
+                found = True
+                self._merge_metadata(step, agent=agent, notes=notes)
+        if not found and strict:
+            raise ValueError(f"workflow module is not in progress tracker: {module}")
         data["updated_at"] = now
         self._save(run_dir, data)
         return data
@@ -87,6 +120,12 @@ class ProgressTracker:
             duration = step.get("duration_seconds")
             duration_text = f"{duration:.1f}s" if isinstance(duration, (int, float)) else "-"
             text = f"  {index}. [{STATUS_LABELS.get(status, status)}] {step.get('name', step.get('id'))} ({step.get('id')}) 用时: {duration_text}"
+            agent = step.get("agent")
+            artifacts = step.get("artifacts") or []
+            if agent:
+                text += f" 执行者: {agent}"
+            if artifacts:
+                text += " 产物: " + ", ".join(str(item) for item in artifacts)
             if color:
                 text = f"{STATUS_COLORS.get(status, '')}{text}{RESET}"
             lines.append(text)
@@ -108,6 +147,29 @@ class ProgressTracker:
 
     def _save(self, run_dir: Path, data: dict[str, Any]) -> None:
         dump_yaml(run_dir / "progress.yaml", data)
+
+    def _merge_metadata(
+        self,
+        step: dict[str, Any],
+        *,
+        artifacts: list[str] | None = None,
+        agent: str | None = None,
+        notes: list[str] | None = None,
+    ) -> None:
+        if agent:
+            step["agent"] = agent
+        if artifacts:
+            existing = list(step.get("artifacts") or [])
+            for artifact in artifacts:
+                if artifact and artifact not in existing:
+                    existing.append(artifact)
+            step["artifacts"] = existing
+        if notes:
+            existing_notes = list(step.get("notes") or [])
+            for note in notes:
+                if note:
+                    existing_notes.append(note)
+            step["notes"] = existing_notes
 
 
 def _now() -> str:

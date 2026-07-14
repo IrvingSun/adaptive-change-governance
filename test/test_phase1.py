@@ -557,7 +557,72 @@ class Phase1Test(unittest.TestCase):
             self.assertIn("data_impact_analysis", task_ids)
             self.assertIn("adversarial_review", task_ids)
             self.assertIn("implementation_gate", task_ids)
+            dependency_task = next(task for task in artifact["tasks"] if task["id"] == "dependency_analysis")
+            self.assertIn("--complete-step", dependency_task["completion_command"])
+            self.assertIn("--module dependency_analysis", dependency_task["completion_command"])
             self.assertTrue((run_dir / "agent-tasks.md").exists())
+
+            started = subprocess.run(
+                [
+                    sys.executable,
+                    str(temp / "bin/change-assess"),
+                    "--start-step",
+                    run_dir.name,
+                    "--module",
+                    "dependency_analysis",
+                    "--agent",
+                    "dependency-analyzer",
+                ],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(started.returncode, 0, started.stderr + started.stdout)
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(temp / "bin/change-assess"),
+                    "--complete-step",
+                    run_dir.name,
+                    "--module",
+                    "dependency_analysis",
+                    "--artifact",
+                    "dependency-analysis.yaml",
+                    "--agent",
+                    "dependency-analyzer",
+                    "--note",
+                    "call graph checked",
+                ],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr + completed.stdout)
+            self.assertIn("Step completed: dependency_analysis", completed.stdout)
+            self.assertIn("产物: dependency-analysis.yaml", completed.stdout)
+            progress = load_yaml(run_dir / "progress.yaml")
+            dependency_step = next(step for step in progress["steps"] if step["id"] == "dependency_analysis")
+            self.assertEqual(dependency_step["status"], "done")
+            self.assertEqual(dependency_step["agent"], "dependency-analyzer")
+            self.assertIn("dependency-analysis.yaml", dependency_step["artifacts"])
+            self.assertIn("call graph checked", dependency_step["notes"])
+            self.assertIsNotNone(dependency_step["duration_seconds"])
+
+            review = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--review-workflow", run_dir.name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(review.returncode, 0, review.stderr + review.stdout)
+            self.assertIn("dependency-analysis.yaml", review.stdout)
         finally:
             shutil.rmtree(temp)
 

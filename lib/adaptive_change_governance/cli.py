@@ -38,12 +38,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--approve-technical-plan", help="Approve a generated technical plan")
     parser.add_argument("--generate-agent-tasks", help="Generate agent-tasks.yaml/md after workflow approval")
     parser.add_argument("--review-agent-tasks", help="Print generated agent task plan")
+    parser.add_argument("--start-step", help="Mark one workflow module as in progress for an existing run id or run directory")
+    parser.add_argument("--complete-step", help="Mark one workflow module as completed for an existing run id or run directory")
     parser.add_argument("--check-gate", help="Check whether a run may enter a stage")
     parser.add_argument("--add-context", help="Add facts, corrections, or scope context to a run id or run directory")
     parser.add_argument("--cleanup-runs", action="store_true", help="Clean old .ai-governance/runs entries according to audit_retention policy")
     parser.add_argument("--cleanup-dry-run", action="store_true", help="Show which run entries would be deleted without deleting them")
     parser.add_argument("--decision", choices=["approve", "reject", "request_changes", "reassess"])
     parser.add_argument("--stage", choices=["technical_plan", "implementation"])
+    parser.add_argument("--module")
+    parser.add_argument("--artifact", action="append", default=[])
+    parser.add_argument("--agent")
+    parser.add_argument("--note", action="append", default=[])
     parser.add_argument("--reviewer")
     parser.add_argument("--raise-level", choices=["L1", "L2", "L3", "L4"])
     parser.add_argument("--reason")
@@ -106,6 +112,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.review_agent_tasks:
         return _review_agent_tasks(root, Path(args.output), args.review_agent_tasks)
+
+    if args.start_step:
+        return _start_step(root, Path(args.output), args.start_step, args, workflow_modules)
+
+    if args.complete_step:
+        return _complete_step(root, Path(args.output), args.complete_step, args, workflow_modules)
 
     if args.check_gate:
         return _check_gate(root, Path(args.output), args.check_gate, args, workflow_modules)
@@ -216,7 +228,7 @@ def _approve_workflow(root: Path, output_root: Path, run_id: str, args: argparse
             comment=args.comment,
         )
         approved = gate.approve_workflow(run_dir, project_risk)
-        ProgressTracker(workflow_modules).mark_current(run_dir, "technical_design")
+        ProgressTracker(workflow_modules).mark_current(run_dir, "technical_design", strict=False)
     except (ConfigError, ReviewError) as exc:
         print(f"BLOCKED: {exc}")
         return 3
@@ -259,8 +271,8 @@ def _propose_technical_plan(root: Path, output_root: Path, run_id: str, workflow
         return 2
     try:
         plan = TechnicalPlanGate(workflow_modules).propose(run_dir)
-        ProgressTracker(workflow_modules).mark_done(run_dir, "technical_design")
-        ProgressTracker(workflow_modules).mark_current(run_dir, "test_design")
+        ProgressTracker(workflow_modules).mark_done(run_dir, "technical_design", strict=False)
+        ProgressTracker(workflow_modules).mark_current(run_dir, "test_design", strict=False)
     except (ConfigError, TechnicalPlanError) as exc:
         print(f"BLOCKED: {exc}")
         return 3
@@ -291,7 +303,7 @@ def _approve_technical_plan(root: Path, output_root: Path, run_id: str, args: ar
         return 2
     try:
         TechnicalPlanGate(workflow_modules).approve(run_dir, reviewer=args.reviewer)
-        ProgressTracker(workflow_modules).mark_done(run_dir, "test_design")
+        ProgressTracker(workflow_modules).mark_done(run_dir, "test_design", strict=False)
     except (ConfigError, TechnicalPlanError) as exc:
         print(f"BLOCKED: {exc}")
         return 3
@@ -329,6 +341,50 @@ def _review_agent_tasks(root: Path, output_root: Path, run_id: str) -> int:
     return 0
 
 
+def _start_step(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, workflow_modules: dict) -> int:
+    run_dir = _resolve_run_dir(root, output_root, run_id)
+    if not run_dir.exists():
+        print(f"ERROR: run not found: {run_id}")
+        return 2
+    if not args.module:
+        print("ERROR: --module is required")
+        return 2
+    try:
+        tracker = ProgressTracker(workflow_modules)
+        tracker.mark_current(run_dir, args.module, agent=args.agent, notes=args.note)
+    except (ConfigError, ValueError) as exc:
+        print(f"ERROR: {exc}")
+        return 2
+    print(f"Step started: {args.module}")
+    print(ProgressTracker(workflow_modules).render(run_dir, color=True), end="")
+    return 0
+
+
+def _complete_step(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, workflow_modules: dict) -> int:
+    run_dir = _resolve_run_dir(root, output_root, run_id)
+    if not run_dir.exists():
+        print(f"ERROR: run not found: {run_id}")
+        return 2
+    if not args.module:
+        print("ERROR: --module is required")
+        return 2
+    try:
+        tracker = ProgressTracker(workflow_modules)
+        tracker.mark_done(
+            run_dir,
+            args.module,
+            artifacts=args.artifact,
+            agent=args.agent,
+            notes=args.note,
+        )
+    except (ConfigError, ValueError) as exc:
+        print(f"ERROR: {exc}")
+        return 2
+    print(f"Step completed: {args.module}")
+    print(ProgressTracker(workflow_modules).render(run_dir, color=True), end="")
+    return 0
+
+
 def _check_gate(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, workflow_modules: dict) -> int:
     run_dir = _resolve_run_dir(root, output_root, run_id)
     if not run_dir.exists():
@@ -340,7 +396,7 @@ def _check_gate(root: Path, output_root: Path, run_id: str, args: argparse.Names
         print("BLOCKED: " + "; ".join(errors))
         return 3
     if stage == "implementation":
-        ProgressTracker(workflow_modules).mark_current(run_dir, "regression_test")
+        ProgressTracker(workflow_modules).mark_current(run_dir, "regression_test", strict=False)
     print(f"GATE OK: {stage} may start")
     return 0
 
