@@ -7,7 +7,7 @@ from typing import Any
 
 from .config_loader import dump_yaml, load_yaml
 from .repository_analyzer import RepositoryAnalyzer
-from .risk_evaluator import LEVEL_ORDER, RiskEvaluator
+from .risk_evaluator import LEVEL_ORDER, RiskEvaluator, render_risk_markdown
 from .workflow_composer import WorkflowComposer
 
 
@@ -31,6 +31,7 @@ class ReassessmentRunner:
         comparison["run_id"] = run_dir.name
         dump_yaml(run_dir / "post-evidence-pack.yaml", post_evidence)
         dump_yaml(run_dir / "post-risk-assessment.yaml", post_risk)
+        (run_dir / "post-risk-assessment.md").write_text(render_risk_markdown(post_risk), encoding="utf-8")
         dump_yaml(run_dir / "post-workflow-recommendation.yaml", post_workflow)
         dump_yaml(run_dir / "reassessment.yaml", comparison)
         (run_dir / "reassessment.md").write_text(self.render_markdown(comparison), encoding="utf-8")

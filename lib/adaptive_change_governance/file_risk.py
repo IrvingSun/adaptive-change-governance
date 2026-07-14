@@ -20,7 +20,28 @@ LOW_EFFECTIVE_RISK_NATURES = {
 }
 
 
-def evaluate_file_risk(paths: list[str], project_risk: dict[str, Any], intent: dict[str, Any] | None = None) -> dict[str, Any]:
+SEMANTIC_ROLE_RISK = {
+    "database_migration": ("critical", "semantic role: database migration or schema/data operation"),
+    "data_access": ("high", "semantic role: persistence or data access code"),
+    "auth_or_permission": ("high", "semantic role: authentication, authorization, or permission registry"),
+    "background_job": ("high", "semantic role: scheduler, worker, or background engine"),
+    "public_api": ("medium", "semantic role: public API, route, or controller"),
+    "service_logic": ("medium", "semantic role: service or business logic"),
+    "configuration": ("medium", "semantic role: runtime configuration"),
+    "frontend_route": ("low", "semantic role: frontend route or navigation display"),
+    "ui_view": ("low", "semantic role: UI view or display text"),
+    "documentation": ("low", "semantic role: documentation"),
+    "test": ("low", "semantic role: automated test"),
+    "generated_asset": ("low", "semantic role: generated or bundled asset"),
+}
+
+
+def evaluate_file_risk(
+    paths: list[str],
+    project_risk: dict[str, Any],
+    intent: dict[str, Any] | None = None,
+    file_facts: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     rules = project_risk.get("file_risk", [])
     intent = intent or {}
     matches = []
@@ -38,6 +59,21 @@ def evaluate_file_risk(paths: list[str], project_risk: dict[str, Any], intent: d
                     "score": FILE_RISK_SCORE.get(level, 2),
                     "reason": str(rule.get("reason", "")),
                 })
+    for fact in file_facts or []:
+        path = str(fact.get("path", ""))
+        role = str(fact.get("role", ""))
+        if not path or role not in SEMANTIC_ROLE_RISK:
+            continue
+        level, reason = SEMANTIC_ROLE_RISK[role]
+        matches.append({
+            "path": path,
+            "pattern": f"semantic:{role}",
+            "level": level,
+            "score": FILE_RISK_SCORE.get(level, 2),
+            "reason": reason,
+            "confidence": str(fact.get("confidence", "unknown")),
+            "evidence_strength": str(fact.get("strength", "weak")),
+        })
     inherent = max((item["score"] for item in matches), default=1)
     effective = _effective_score(inherent, intent)
     constraints = []

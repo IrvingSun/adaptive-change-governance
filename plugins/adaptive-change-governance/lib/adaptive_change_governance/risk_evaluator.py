@@ -21,6 +21,40 @@ WEIGHTS = {
 }
 
 
+def render_risk_markdown(risk: dict[str, Any]) -> str:
+    explanation = risk.get("risk_explanation", {})
+    lines = [
+        "# Risk Assessment",
+        "",
+        f"- FACT: weighted_score={risk.get('weighted_score')}",
+        f"- DECISION: calculated_level={risk.get('calculated_level')}",
+        f"- DECISION: guardrail_minimum_level={risk.get('guardrail_minimum_level')}",
+        f"- DECISION: final_level={risk.get('final_level')}",
+        "",
+        "## Dimension Scores",
+    ]
+    for item in explanation.get("dimension_explanations", []):
+        lines.append(f"- DECISION: {item.get('dimension')} score={item.get('score')} weight={item.get('weight')}")
+        for fact in item.get("evidence", [])[:4]:
+            lines.append(f"  - {fact}")
+    lines.extend(["", "## Guardrail Evaluations"])
+    for item in explanation.get("guardrail_evaluations", []):
+        lines.append(
+            f"- DECISION: {item.get('id')} status={item.get('status')} strength={item.get('strength')} "
+            f"needs_human_confirmation={item.get('needs_human_confirmation')}"
+        )
+        for fact in item.get("evidence", [])[:3]:
+            lines.append(f"  - {fact.get('text', fact)}")
+        lines.append(f"  - {item.get('decision')}")
+    lines.extend(["", "## Decision Trace"])
+    lines.extend(f"- {item}" for item in explanation.get("decision_trace", []) or risk.get("judgments", []))
+    lines.extend(["", "## Required By Guardrails"])
+    lines.extend(f"- DECISION: {item}" for item in risk.get("required_by_guardrails", []) or ["none"])
+    lines.extend(["", "## Prohibited"])
+    lines.extend(f"- DECISION: {item}" for item in risk.get("prohibited", []) or ["none"])
+    return "\n".join(lines) + "\n"
+
+
 @dataclass
 class RiskEvaluator:
     project_risk: dict[str, Any]
@@ -37,6 +71,7 @@ class RiskEvaluator:
         final_level = self._max_level(calculated_level, guardrail_minimum)
         required_by_guardrails = sorted({module for item in triggered for module in item.get("require", [])})
         prohibited = sorted({module for item in triggered for module in item.get("prohibit", [])})
+        explanation = self._risk_explanation(evidence, triggered_details, triggered, dimensions)
         return {
             "version": 1,
             "risk_dimensions": dimensions,
@@ -51,6 +86,7 @@ class RiskEvaluator:
             "weak_guardrail_candidates": weak_candidates,
             "required_by_guardrails": required_by_guardrails,
             "prohibited": prohibited,
+            "risk_explanation": explanation,
             "judgments": self._judgments(evidence, triggered, dimensions, calculated_level, final_level),
         }
 
@@ -133,6 +169,136 @@ class RiskEvaluator:
             return f"DECISION: triggered {guardrail_id} because strong evidence matched at least one hard-guardrail condition."
         return f"DECISION: triggered {guardrail_id} from weak signals; keep guardrail active and require human confirmation."
 
+    def _risk_explanation(
+        self,
+        evidence: dict[str, Any],
+        details: list[dict[str, Any]],
+        triggered: list[dict[str, Any]],
+        dimensions: dict[str, int],
+    ) -> dict[str, Any]:
+        triggered_ids = {item.get("id") for item in triggered}
+        return {
+            "dimension_explanations": self._dimension_explanations(evidence, dimensions),
+            "guardrail_evaluations": self._guardrail_evaluations(details, triggered_ids),
+            "decision_trace": self._decision_trace(evidence, details, triggered_ids),
+        }
+
+    def _dimension_explanations(self, evidence: dict[str, Any], dimensions: dict[str, int]) -> list[dict[str, Any]]:
+        code = evidence.get("code_findings", {})
+        tests = evidence.get("test_findings", {})
+        file_risk = code.get("file_risk", {})
+        boundary = code.get("feature_boundary", {})
+        boundary_summary = boundary.get("summary", {}) if isinstance(boundary, dict) else {}
+        unknowns = evidence.get("unknowns", [])
+        inputs = {
+            "business_criticality": [
+                f"FACT: affected_domains={code.get('affected_domains', [])}",
+                f"FACT: file_risk_effective_level={file_risk.get('effective_level', 'unknown')}",
+            ],
+            "production_impact": [
+                f"FACT: public_api_changes={code.get('public_api_changes')}",
+                f"FACT: database_changes={code.get('database_changes')}",
+                f"FACT: message_schema_changes={code.get('message_schema_changes')}",
+            ],
+            "change_scope": [
+                f"FACT: direct_files={len(code.get('direct_files', []))}",
+                f"FACT: affected_modules={code.get('affected_modules', [])}",
+                f"FACT: ambiguous_important_files={boundary_summary.get('ambiguous_important_files', 0)}",
+            ],
+            "dependency_coupling": [
+                f"FACT: dependency complexity comes from project-risk.yaml engineering_health.dependency_complexity={self.project_risk.get('engineering_health', {}).get('dependency_complexity', 'unknown')}",
+            ],
+            "uncertainty": [
+                f"UNKNOWN: unknown_count={len(unknowns)}",
+                f"FACT: feature_boundary_confidence={boundary_summary.get('confidence', 'unknown')}",
+            ],
+            "reversibility": [
+                f"FACT: rollback capability comes from project-risk.yaml engineering_health.rollback_capability={self.project_risk.get('engineering_health', {}).get('rollback_capability', 'unknown')}",
+            ],
+            "data_risk": [
+                f"FACT: database_changes={code.get('database_changes')}",
+                f"FACT: operations={code.get('operations', [])}",
+            ],
+            "security_risk": [
+                f"FACT: affected_domains={code.get('affected_domains', [])}",
+            ],
+            "testability_risk": [
+                f"FACT: coverage_confidence={tests.get('coverage_confidence', 'unknown')}",
+                f"FACT: existing_tests={tests.get('existing_tests', [])[:5]}",
+            ],
+            "observability_risk": [
+                f"FACT: observability comes from project-risk.yaml engineering_health.observability={self.project_risk.get('engineering_health', {}).get('observability', 'unknown')}",
+            ],
+        }
+        explanations = []
+        for name, score in dimensions.items():
+            explanations.append({
+                "dimension": name,
+                "score": score,
+                "weight": WEIGHTS.get(name),
+                "evidence": inputs.get(name, []),
+                "decision": self._dimension_decision(name, score),
+            })
+        return explanations
+
+    def _dimension_decision(self, name: str, score: int) -> str:
+        if score <= 1:
+            band = "low"
+        elif score <= 3:
+            band = "medium"
+        else:
+            band = "high"
+        return f"DECISION: {name} scored {score} ({band}) from code facts, project risk profile, and explicit UNKNOWN items."
+
+    def _guardrail_evaluations(self, details: list[dict[str, Any]], triggered_ids: set[str]) -> list[dict[str, Any]]:
+        by_id = {item.get("id"): item for item in details}
+        evaluations = []
+        for guardrail in self.guardrails.get("hard_guardrails", []):
+            guardrail_id = guardrail.get("id")
+            detail = by_id.get(guardrail_id)
+            if guardrail_id in triggered_ids:
+                status = "triggered"
+                decision = f"DECISION: hard guardrail {guardrail_id} is active; required modules and prohibitions are mandatory."
+            elif detail:
+                status = "weak_candidate"
+                decision = f"DECISION: hard guardrail {guardrail_id} is a weak candidate only; it requires human confirmation and does not set the hard minimum level."
+            else:
+                status = "not_matched"
+                decision = f"DECISION: hard guardrail {guardrail_id} did not match current evidence."
+            evaluations.append({
+                "id": guardrail_id,
+                "status": status,
+                "strength": detail.get("strength") if detail else "none",
+                "needs_human_confirmation": bool(detail.get("needs_human_confirmation")) if detail else False,
+                "matched_conditions": [match.get("condition") for match in detail.get("matches", [])] if detail else [],
+                "evidence": [
+                    fact
+                    for match in detail.get("matches", [])
+                    for fact in match.get("evidence", [])
+                ][:10] if detail else [],
+                "required_modules": guardrail.get("require", []),
+                "prohibited": guardrail.get("prohibit", []),
+                "decision": decision,
+            })
+        return evaluations
+
+    def _decision_trace(self, evidence: dict[str, Any], details: list[dict[str, Any]], triggered_ids: set[str]) -> list[str]:
+        code = evidence.get("code_findings", {})
+        boundary = code.get("feature_boundary", {})
+        summary = boundary.get("summary", {}) if isinstance(boundary, dict) else {}
+        trace = [
+            f"FACT: feature boundary confidence={summary.get('confidence', 'unknown')}; confirmed_files={summary.get('confirmed_files', 0)}; ambiguous_important_files={summary.get('ambiguous_important_files', 0)}.",
+            f"FACT: file risk inherent={code.get('file_risk', {}).get('highest_level', 'unknown')}; effective={code.get('file_risk', {}).get('effective_level', 'unknown')}.",
+            f"FACT: strong guardrails={sorted(triggered_ids)}.",
+        ]
+        weak = [item.get("id") for item in details if item.get("strength") == "weak"]
+        if weak:
+            trace.append(f"WEAK SIGNAL: weak guardrail candidates={weak}; they do not lower or remove hard gates and require human confirmation.")
+        if evidence.get("unknowns"):
+            trace.append("UNKNOWN: " + "; ".join(item.replace("UNKNOWN: ", "", 1) for item in evidence.get("unknowns", [])[:5]))
+        trace.append("DECISION: final risk level is calculated from weighted dimensions, then raised if any strong hard guardrail minimum is higher.")
+        return trace
+
     def _score_dimensions(self, evidence: dict[str, Any], triggered: list[dict[str, Any]]) -> dict[str, int]:
         business = self.project_risk.get("business_risk", {})
         engineering = self.project_risk.get("engineering_health", {})
@@ -143,6 +309,10 @@ class RiskEvaluator:
         change_types = set(code.get("change_types", []))
         file_risk = code.get("file_risk", {})
         file_risk_score = int(file_risk.get("effective_score", file_risk.get("highest_score", 1)) or 1)
+        feature_boundary = code.get("feature_boundary", {}) if isinstance(code.get("feature_boundary"), dict) else {}
+        boundary_summary = feature_boundary.get("summary", {}) if isinstance(feature_boundary.get("summary"), dict) else {}
+        boundary_confidence = str(boundary_summary.get("confidence", "unknown"))
+        ambiguous_important_files = int(boundary_summary.get("ambiguous_important_files", 0) or 0)
         critical_domains = set(self.project_risk.get("critical_domains", []))
         intrinsically_sensitive = {
             "financial-calculation",
@@ -181,6 +351,12 @@ class RiskEvaluator:
             production_impact = max(1, int(business.get("customer_impact", 3))) if (sensitive_change or public_or_data_change) else 2
             change_scope = 1 + min(4, len(code.get("direct_files", [])) // 5 + len(code.get("affected_modules", [])))
             uncertainty = 2 + min(3, len(unknowns) // 2)
+            if boundary_confidence == "low":
+                uncertainty = max(uncertainty, 4)
+            elif boundary_confidence == "medium":
+                uncertainty = max(uncertainty, 3)
+            if ambiguous_important_files:
+                uncertainty = max(uncertainty, 4)
             reversibility = 6 - max(1, int(engineering.get("rollback_capability", 3)))
             data_risk = max(1, int(business.get("data_integrity", 3))) if code.get("database_changes") else (3 if sensitive_change else 1)
             testability_risk = 5 if tests.get("coverage_confidence") == "low" else 3
@@ -209,6 +385,8 @@ class RiskEvaluator:
         if file_risk_score >= 5:
             dimensions["data_risk"] = max(dimensions["data_risk"], 4)
             dimensions["production_impact"] = max(dimensions["production_impact"], 4)
+        if ambiguous_important_files:
+            dimensions["change_scope"] = max(dimensions["change_scope"], min(5, 2 + ambiguous_important_files))
         return {key: min(5, max(1, value)) for key, value in dimensions.items()}
 
     def _has_security_domain(self, code: dict[str, Any]) -> bool:
@@ -249,6 +427,17 @@ class RiskEvaluator:
             )
             if file_risk.get("risk_adjustment") != "none":
                 judgments.append("DECISION: file risk was adjusted by change nature, subject to diff verification.")
+        feature_boundary = evidence.get("code_findings", {}).get("feature_boundary", {})
+        if feature_boundary:
+            summary = feature_boundary.get("summary", {})
+            judgments.append(
+                "FACT: feature boundary confidence is "
+                f"{summary.get('confidence', 'unknown')} with "
+                f"{summary.get('confirmed_files', 0)} confirmed file(s) and "
+                f"{summary.get('ambiguous_important_files', 0)} ambiguous important file(s)."
+            )
+            if summary.get("ambiguous_important_files", 0):
+                judgments.append("UNKNOWN: important files with weak request relation increase uncertainty risk.")
         if triggered:
             judgments.append("FACT: hard guardrails matched: " + ", ".join(item["id"] for item in triggered) + ".")
             for detail in self._triggered_guardrail_details(evidence):

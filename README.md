@@ -65,6 +65,7 @@ The command writes an isolated run under `.ai-governance/runs/`:
 - `request.md`
 - `evidence-pack.yaml`
 - `risk-assessment.yaml`
+- `risk-assessment.md`
 - `workflow-recommendation.yaml`
 - `workflow-plan.md`
 - `progress.yaml`
@@ -101,6 +102,8 @@ Human reviewers can add modules, raise risk, and correct AI assumptions from CLI
 
 Low-risk menu or copy changes are routed through the lightweight path when structured intent says the change is display-only and code evidence does not contradict it. Weak guardrail signals are shown as candidates for human confirmation, but they do not set the hard minimum risk level unless supported by strong evidence.
 
+`evidence-pack.yaml` includes a feature boundary: confirmed files, weak signal files, ambiguous important files, semantic file roles, and UNKNOWN items for dynamic routing or implicit dependencies. Risk scoring uses this boundary so generic keyword matches do not automatically become hard facts.
+
 File importance is part of risk routing. Configure `file_risk` in `.ai-governance/project-risk.yaml` so similarly sized changes can route differently:
 
 ```yaml
@@ -115,7 +118,7 @@ file_risk:
 
 File risk has two levels:
 
-- `highest_level`: inherent file importance from `file_risk` rules.
+- `highest_level`: inherent file importance from `file_risk` rules plus semantic file role inference.
 - `effective_level`: risk after considering structured change intent. For example, a comment-only change in `app/database.py` keeps `highest_level: high` but may route with `effective_level: low`, while adding an UNKNOWN requiring the implementation diff to prove the change is comment-only.
 
 After workflow approval, generate and approve the technical plan before implementation:
@@ -160,6 +163,7 @@ The technical-plan gate writes:
 - `diff-verification.md`
 - `post-evidence-pack.yaml`
 - `post-risk-assessment.yaml`
+- `post-risk-assessment.md`
 - `reassessment.yaml`
 - `reassessment.md`
 - `verification-report.yaml`

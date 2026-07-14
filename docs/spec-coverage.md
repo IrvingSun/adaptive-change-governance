@@ -63,7 +63,7 @@ Remaining gap:
 
 ### Phase 2: Code Fact Scanning
 
-Status: implemented, coarse.
+Status: implemented at MVP+ level.
 
 Implemented by:
 
@@ -76,11 +76,13 @@ Covered facts:
 - Git branch/commit/dirty status
 - relevant files
 - related files
+- feature boundary with confirmed files, weak signals, and ambiguous important files
+- file semantic role classification
 - test files
 - affected domains
 - change types
 - operations
-- file risk profile
+- file risk profile with configured rules plus semantic role inference
 - current diff signals through later `DiffVerifier`
 
 Remaining gaps:
@@ -88,6 +90,7 @@ Remaining gaps:
 - Dependency analysis is keyword/path based, not a full AST or call graph.
 - Framework route discovery and dynamic invocation remain UNKNOWN when not directly visible.
 - Cross-service dependency discovery is heuristic.
+- Host-model intent can still improve include/exclude boundaries for natural-language negation and product-specific terms.
 
 ### Phase 3: Risk Scoring
 
@@ -99,6 +102,9 @@ Implemented by:
 - weighted dimensions
 - hard guardrail minimum level enforcement
 - weak signal handling
+- structured dimension explanations in `risk_explanation.dimension_explanations`
+- structured hard guardrail evaluations in `risk_explanation.guardrail_evaluations`
+- `risk-assessment.md` and `post-risk-assessment.md`
 - request goal handling for analysis-only and decision-support requests
 
 Remaining gaps:

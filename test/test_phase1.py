@@ -86,6 +86,9 @@ class Phase1Test(unittest.TestCase):
             risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)
             workflow = WorkflowComposer(self.project_risk, self.modules).compose(evidence, risk)
             self.assertTrue(evidence["code_findings"]["text_only_change"])
+            boundary = evidence["code_findings"]["feature_boundary"]
+            self.assertEqual("high", boundary["summary"]["confidence"])
+            self.assertTrue(any(item["path"] == "frontend/src/layouts/BotLayout.vue" for item in boundary["included_files"]))
             self.assertEqual([], risk["triggered_guardrails"])
             self.assertEqual("L1", risk["final_level"])
             self.assertEqual(["code_fact_scan", "regression_test"], workflow["workflow_recommendation"]["required_modules"])
@@ -152,11 +155,30 @@ class Phase1Test(unittest.TestCase):
 
             self.assertEqual("low", ui_evidence["code_findings"]["file_risk"]["highest_level"])
             self.assertEqual("high", db_evidence["code_findings"]["file_risk"]["highest_level"])
+            self.assertTrue(any(item.get("pattern") == "semantic:data_access" for item in db_evidence["code_findings"]["file_risk"]["matches"]))
             self.assertEqual("L1", ui_risk["final_level"])
             self.assertGreater({"L1": 1, "L2": 2, "L3": 3, "L4": 4}[db_risk["final_level"]], {"L1": 1, "L2": 2, "L3": 3, "L4": 4}[ui_risk["final_level"]])
         finally:
             shutil.rmtree(ui_temp)
             shutil.rmtree(db_temp)
+
+    def test_semantic_file_role_can_raise_unconfigured_database_file_risk(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            (temp / "src/persistence").mkdir(parents=True)
+            (temp / "src/persistence/connection.ts").write_text(
+                "export const databaseUrl = process.env.DATABASE_URL\n"
+                "export function query(sql: string) { return sql }\n",
+                encoding="utf-8",
+            )
+            evidence = RepositoryAnalyzer(temp).analyze("修改 database 连接名称", self.project_risk)
+            file_risk = evidence["code_findings"]["file_risk"]
+            boundary = evidence["code_findings"]["feature_boundary"]
+            self.assertEqual("high", file_risk["highest_level"])
+            self.assertTrue(any(item.get("pattern") == "semantic:data_access" for item in file_risk["matches"]))
+            self.assertTrue(any(item["role"] == "data_access" for item in boundary["file_roles"]))
+        finally:
+            shutil.rmtree(temp)
 
     def test_comment_only_change_lowers_effective_file_risk_but_keeps_inherent_risk(self):
         temp = Path(tempfile.mkdtemp())
@@ -523,8 +545,15 @@ class Phase1Test(unittest.TestCase):
             )
             self.assertEqual(execute_next.returncode, 3, execute_next.stderr + execute_next.stdout)
             self.assertIn("requires user confirmation", execute_next.stdout)
-            for artifact in ("evidence-pack.yaml", "risk-assessment.yaml", "workflow-plan.md"):
+            for artifact in ("evidence-pack.yaml", "risk-assessment.yaml", "risk-assessment.md", "workflow-plan.md"):
                 self.assertTrue((runs[0] / artifact).exists(), artifact)
+            risk_data = load_yaml(runs[0] / "risk-assessment.yaml")
+            self.assertIn("risk_explanation", risk_data)
+            self.assertTrue(risk_data["risk_explanation"]["dimension_explanations"])
+            self.assertTrue(risk_data["risk_explanation"]["guardrail_evaluations"])
+            risk_md = (runs[0] / "risk-assessment.md").read_text(encoding="utf-8")
+            self.assertIn("## Dimension Scores", risk_md)
+            self.assertIn("## Guardrail Evaluations", risk_md)
             for artifact in ("review.md", "human-review.yaml"):
                 self.assertTrue((runs[0] / artifact).exists(), artifact)
             progress = load_yaml(runs[0] / "progress.yaml")
@@ -989,6 +1018,7 @@ class Phase1Test(unittest.TestCase):
             self.assertEqual(reassess.returncode, 0, reassess.stderr + reassess.stdout)
             self.assertTrue((run_dir / "post-evidence-pack.yaml").exists())
             self.assertTrue((run_dir / "post-risk-assessment.yaml").exists())
+            self.assertTrue((run_dir / "post-risk-assessment.md").exists())
             self.assertTrue((run_dir / "reassessment.yaml").exists())
             self.assertIn("Requires human reapproval: False", reassess.stdout)
             verification = subprocess.run(

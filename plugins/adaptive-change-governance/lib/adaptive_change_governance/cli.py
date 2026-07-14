@@ -17,7 +17,7 @@ from .next_action import NextActionPlanner
 from .progress import ProgressTracker
 from .reassessment import ReassessmentRunner
 from .repository_analyzer import RepositoryAnalyzer
-from .risk_evaluator import RiskEvaluator
+from .risk_evaluator import RiskEvaluator, render_risk_markdown
 from .run_status import RunStatusRenderer
 from .run_retention import cleanup_runs, render_cleanup_summary
 from .schema_validator import ValidationError, validate_all
@@ -192,6 +192,7 @@ def main(argv: list[str] | None = None) -> int:
 
     dump_yaml(run_dir / "evidence-pack.yaml", evidence)
     dump_yaml(run_dir / "risk-assessment.yaml", risk)
+    (run_dir / "risk-assessment.md").write_text(render_risk_markdown(risk), encoding="utf-8")
     dump_yaml(run_dir / "workflow-recommendation.yaml", workflow)
     tracker = ProgressTracker(workflow_modules)
     tracker.initialize(run_dir, workflow["workflow_recommendation"].get("required_modules", []), current="code_fact_scan")

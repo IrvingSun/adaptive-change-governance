@@ -89,10 +89,20 @@ class RepositoryAnalyzer:
         message_schema_changes = "message_schema" in change_types
         related_files = self._related_files(direct_files, files)
         unknowns = self._unknowns(direct_files, related_files, tests, git_info)
+        feature_boundary = self._feature_boundary(request, direct_files, related_files, text_only_change)
+        unknowns.extend(feature_boundary.get("unknowns", []))
 
         affected_domains = sorted(set(request_domains + file_domains))
         affected_modules = sorted({Path(item["path"]).parts[0] for item in direct_files + related_files if Path(item["path"]).parts})
-        file_risk = evaluate_file_risk([item["path"] for item in direct_files + related_files], project_risk, intent=intent)
+        file_risk_intent = dict(intent)
+        if text_only_change and not file_risk_intent.get("change_nature"):
+            file_risk_intent["change_nature"] = "display_text_only"
+        file_risk = evaluate_file_risk(
+            [item["path"] for item in direct_files + related_files],
+            project_risk,
+            intent=file_risk_intent,
+            file_facts=feature_boundary.get("file_roles", []),
+        )
         unknowns.extend(file_risk.get("constraints", []))
 
         return {
@@ -119,6 +129,7 @@ class RepositoryAnalyzer:
                 "message_schema_changes": message_schema_changes,
                 "public_api_changes": public_api_changes,
                 "text_only_change": text_only_change,
+                "feature_boundary": feature_boundary,
                 "file_risk": file_risk,
                 "scheduled_jobs_affected": self._path_or_request_matches(direct_files, request, ["cron", "job", "scheduler", "定时"]),
                 "configuration_changes": "configuration" in change_types,
@@ -185,6 +196,141 @@ class RepositoryAnalyzer:
             if any(stem and stem in lower for stem in stems):
                 related.append({"path": rel, "reason": "INFERENCE: filename suggests relation to direct finding"})
         return related[:50]
+
+    def _feature_boundary(
+        self,
+        request: str,
+        direct_files: list[dict[str, str]],
+        related_files: list[dict[str, str]],
+        text_only_change: bool,
+    ) -> dict[str, Any]:
+        relation_tokens = self._relation_tokens(request)
+        file_roles = []
+        included = []
+        weak = []
+        ambiguous = []
+        for item in (direct_files + related_files)[:80]:
+            path = item["path"]
+            text = self._safe_file_text(path)
+            role = self._classify_file_role(path, text)
+            relation = self._file_relation_to_request(path, text, relation_tokens)
+            confidence = self._boundary_confidence(role, relation, text_only_change)
+            strength = "strong" if confidence in {"high", "medium"} and relation["strength"] == "strong" else "weak"
+            fact = self._boundary_fact(path, role, relation, confidence, strength)
+            entry = {
+                "path": path,
+                "role": role,
+                "confidence": confidence,
+                "strength": strength,
+                "matched_relation_tokens": relation["tokens"],
+                "relation_mode": relation["mode"],
+                "fact": fact,
+            }
+            file_roles.append(entry)
+            if strength == "strong":
+                included.append(entry)
+            elif not text_only_change and role in {"database_migration", "data_access", "auth_or_permission", "public_api", "configuration", "background_job"}:
+                ambiguous.append(entry)
+            else:
+                weak.append(entry)
+        unknowns = []
+        if not included:
+            unknowns.append("UNKNOWN: feature boundary has no strong code ownership evidence; human or model intent confirmation is required.")
+        if ambiguous:
+            unknowns.append("UNKNOWN: some important files are only weakly related to the request; treat them as candidates, not confirmed change scope.")
+        return {
+            "target_terms": relation_tokens[:20],
+            "summary": self._feature_boundary_summary(included, ambiguous, weak),
+            "included_files": included[:30],
+            "ambiguous_files": ambiguous[:30],
+            "weak_signal_files": weak[:30],
+            "file_roles": file_roles[:80],
+            "unknowns": unknowns,
+            "trace": [
+                "FACT: feature boundary is derived from request-specific tokens, path/content matches, and file semantic role.",
+                "INFERENCE: strong boundary files are better candidates for change scope than weak signal files.",
+                "UNKNOWN: dynamic routing, reflection, generated code, and runtime registration can still hide dependencies.",
+            ],
+        }
+
+    def _safe_file_text(self, rel_path: str) -> str:
+        try:
+            return (self.root / rel_path).read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return ""
+
+    def _classify_file_role(self, path: str, text: str) -> str:
+        lower_path = path.lower()
+        lower = f"{lower_path}\n{text.lower()}"
+        if lower_path.startswith(("static/assets/", "dist/", "build/")) or ".min." in lower_path:
+            return "generated_asset"
+        if lower_path.startswith(("test/", "tests/")) or "_test." in lower_path or ".test." in lower_path or ".spec." in lower_path:
+            return "test"
+        if lower_path.startswith("docs/") or lower_path.endswith((".md", ".rst", ".txt")):
+            return "documentation"
+        if lower_path.endswith(".sql") or "migrations/" in lower_path or any(marker in lower for marker in ("alter table", "drop table", "drop column", "create table")):
+            return "database_migration"
+        if any(marker in lower_path for marker in ("auth", "permission", "role")) or any(marker in lower for marker in ("permission", "jwt", "token", "权限", "授权")):
+            return "auth_or_permission"
+        if any(marker in lower_path for marker in ("scheduler", "worker", "engine", "cron", "job")):
+            return "background_job"
+        if any(marker in lower_path for marker in ("database", "repository", "dao", "mapper", "models/", "persistence")) or any(marker in lower for marker in ("database_url", "sqlalchemy", "django.db", "select ", "insert ", "update ", "delete from", "query(")):
+            return "data_access"
+        if "/api/" in lower_path or any(marker in lower for marker in ("apirouter", "fastapi", "router.", "@route", "controller", "endpoint")):
+            return "public_api"
+        if any(marker in lower_path for marker in ("router", "layouts")) or any(marker in lower for marker in ("path:", "menu", "菜单")):
+            return "frontend_route"
+        if lower_path.startswith("frontend/src/views/") or lower_path.endswith((".vue", ".jsx", ".tsx")):
+            return "ui_view"
+        if any(marker in lower_path for marker in ("service", "services/")):
+            return "service_logic"
+        if lower_path.endswith((".yaml", ".yml", ".json", ".toml", ".ini")) or "config" in lower_path:
+            return "configuration"
+        return "unknown"
+
+    def _file_relation_to_request(self, path: str, text: str, relation_tokens: list[str]) -> dict[str, Any]:
+        lower_path = path.lower()
+        lower_text = text.lower()
+        path_tokens = [token for token in relation_tokens if token in lower_path]
+        if path_tokens:
+            return {"strength": "strong", "mode": "path", "tokens": path_tokens[:10]}
+        for line in lower_text.splitlines():
+            line_tokens = [token for token in relation_tokens if token in line]
+            if line_tokens:
+                return {"strength": "strong", "mode": "same_line", "tokens": line_tokens[:10]}
+        content_tokens = [token for token in relation_tokens if token in lower_text]
+        if content_tokens:
+            return {"strength": "weak", "mode": "content_distant", "tokens": content_tokens[:10]}
+        return {"strength": "weak", "mode": "none", "tokens": []}
+
+    def _boundary_confidence(self, role: str, relation: dict[str, Any], text_only_change: bool) -> str:
+        if relation["strength"] != "strong":
+            return "low"
+        if text_only_change and role in {"ui_view", "frontend_route", "documentation", "configuration"}:
+            return "high"
+        if role in {"database_migration", "data_access", "auth_or_permission", "background_job", "public_api", "service_logic", "frontend_route", "ui_view"}:
+            return "high" if relation["mode"] == "path" else "medium"
+        return "medium"
+
+    def _boundary_fact(self, path: str, role: str, relation: dict[str, Any], confidence: str, strength: str) -> str:
+        prefix = "FACT" if strength == "strong" else "WEAK SIGNAL"
+        if relation["tokens"]:
+            tokens = ", ".join(relation["tokens"][:5])
+            return f"{prefix}: {path} is classified as {role}; relation to request is {relation['mode']} via token(s): {tokens}; confidence={confidence}."
+        return f"{prefix}: {path} is classified as {role}, but no request-specific relation token was found; confidence={confidence}."
+
+    def _feature_boundary_summary(
+        self,
+        included: list[dict[str, Any]],
+        ambiguous: list[dict[str, Any]],
+        weak: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "confirmed_files": len(included),
+            "ambiguous_important_files": len(ambiguous),
+            "weak_signal_files": len(weak),
+            "confidence": "high" if included and not ambiguous else ("medium" if included else "low"),
+        }
 
     def _find_tests(self, files: list[Path]) -> list[str]:
         tests = []
