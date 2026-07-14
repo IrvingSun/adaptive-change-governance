@@ -83,6 +83,8 @@ change-assess --review-technical-plan <run_id>
 change-assess --approve-technical-plan <run_id>
 change-assess --check-gate <run_id> --stage implementation
 change-assess --verify-diff <run_id>
+change-assess --reassess <run_id>
+change-assess --generate-verification-report <run_id>
 change-assess --validate-artifact <run_id> --module dependency_analysis --artifact dependency-analysis.yaml
 ```
 
@@ -117,6 +119,7 @@ Hard constraints:
 - File importance from `file_risk` must influence routing: database, auth, migration, scheduler, and API files are higher impact than UI copy files even when the diff size is similar.
 - Distinguish inherent file importance from effective change risk. A comment-only change in a high-risk file may stay lightweight only when structured intent says `change_nature: comment_only`, and the implementation diff must later prove that no executable behavior changed.
 - After implementation, run `change-assess --verify-diff <run_id>` to produce `diff-verification.yaml/md`; blocked diff verification must stop handoff.
+- After implementation, run `change-assess --reassess <run_id>` and `change-assess --generate-verification-report <run_id>` before final handoff.
 - For L3/L4 workflows, generate `agent-tasks.yaml` and use subagents for narrow read-only or review-only tasks before implementation.
 - Subagents must report completed workflow modules with `change-assess --complete-step`; the progress status bar must show completed state, elapsed time, and artifact path.
 - Structured subagent artifacts must satisfy `.ai-governance/artifact-schemas.yaml`; missing required fields block completion.

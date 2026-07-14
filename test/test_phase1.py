@@ -967,6 +967,43 @@ class Phase1Test(unittest.TestCase):
             self.assertEqual(pass_result.returncode, 0, pass_result.stderr + pass_result.stdout)
             self.assertIn("Status: pass", pass_result.stdout)
             self.assertEqual("pass", load_yaml(run_dir / "diff-verification.yaml")["status"])
+            approved_required = load_yaml(run_dir / "approved-workflow.yaml")["workflow_recommendation"]["required_modules"]
+            for module in approved_required:
+                completed_module = subprocess.run(
+                    [sys.executable, str(temp / "bin/change-assess"), "--complete-step", run_dir.name, "--module", module],
+                    cwd=temp,
+                    env=env,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(completed_module.returncode, 0, completed_module.stderr + completed_module.stdout)
+            reassess = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--reassess", run_dir.name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(reassess.returncode, 0, reassess.stderr + reassess.stdout)
+            self.assertTrue((run_dir / "post-evidence-pack.yaml").exists())
+            self.assertTrue((run_dir / "post-risk-assessment.yaml").exists())
+            self.assertTrue((run_dir / "reassessment.yaml").exists())
+            self.assertIn("Requires human reapproval: False", reassess.stdout)
+            verification = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--generate-verification-report", run_dir.name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(verification.returncode, 0, verification.stderr + verification.stdout)
+            self.assertIn("Status: pass", verification.stdout)
+            self.assertTrue((run_dir / "verification-report.yaml").exists())
+            self.assertTrue((run_dir / ".verification-complete").exists())
+            self.assertEqual("COMPLETED", load_yaml(run_dir / "run-state.yaml")["state"])
 
             database.write_text("# new comment\nDATABASE_NAME = 'other'\n", encoding="utf-8")
             blocked = subprocess.run(

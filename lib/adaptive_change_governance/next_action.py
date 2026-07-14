@@ -42,6 +42,17 @@ class NextActionPlanner:
             return self._auto(action, "propose_technical_plan", f"change-assess --propose-technical-plan {run_dir.name}")
         if not (run_dir / ".technical-plan-approved").exists():
             return self._manual(action, "approve_technical_plan", f"change-assess --approve-technical-plan {run_dir.name}")
+        if not (run_dir / "reassessment.yaml").exists():
+            return self._auto(action, "reassess", f"change-assess --reassess {run_dir.name}")
+        reassessment = self._load_if_exists(run_dir / "reassessment.yaml")
+        if reassessment.get("reassessment", {}).get("requires_human_reapproval"):
+            return self._manual(action, "review_reassessment", f"change-assess --review-workflow {run_dir.name}")
+        if not (run_dir / "verification-report.yaml").exists():
+            return self._auto(action, "generate_verification_report", f"change-assess --generate-verification-report {run_dir.name}")
+        verification = self._load_if_exists(run_dir / "verification-report.yaml")
+        if verification.get("status") == "pass":
+            action["recommended_action"] = "complete"
+            return action
         action["recommended_action"] = "implementation_gate_ready"
         action["command"] = f"change-assess --check-gate {run_dir.name} --stage implementation"
         action["can_execute"] = False
@@ -49,6 +60,12 @@ class NextActionPlanner:
         return action
 
     def current_gate(self, run_dir: Path, rec: dict[str, Any]) -> str:
+        if (run_dir / ".verification-complete").exists():
+            return "completed"
+        if (run_dir / "verification-report.yaml").exists():
+            verification = self._load_if_exists(run_dir / "verification-report.yaml")
+            if verification.get("status") == "blocked":
+                return "verification_blocked"
         if (run_dir / "diff-verification.yaml").exists():
             diff = self._load_if_exists(run_dir / "diff-verification.yaml")
             if diff.get("status") == "blocked":
@@ -69,6 +86,11 @@ class NextActionPlanner:
 
     def blockers(self, run_dir: Path) -> list[str]:
         blockers = []
+        if (run_dir / "verification-report.yaml").exists():
+            verification = self._load_if_exists(run_dir / "verification-report.yaml")
+            if verification.get("status") == "blocked":
+                errors = "; ".join(verification.get("blockers", []))
+                blockers.append(f"verification-report.yaml blocked: {errors}")
         for path in run_dir.glob("artifact-validation-*.yaml"):
             validation = self._load_if_exists(path)
             if validation.get("status") == "blocked":
@@ -121,6 +143,8 @@ class NextActionPlanner:
             action["command"] = f"change-assess --validate-artifact {action['run_id']} --module <module> --artifact <artifact>"
         elif any("diff-verification" in item for item in blockers):
             action["command"] = f"change-assess --verify-diff {action['run_id']}"
+        elif any("verification-report" in item for item in blockers):
+            action["command"] = f"change-assess --generate-verification-report {action['run_id']}"
         else:
             action["command"] = f"change-assess --status {action['run_id']}"
         return action

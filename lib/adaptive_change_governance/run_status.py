@@ -28,6 +28,13 @@ ARTIFACTS = [
     "approved-technical-plan.md",
     "diff-verification.yaml",
     "diff-verification.md",
+    "post-evidence-pack.yaml",
+    "post-risk-assessment.yaml",
+    "reassessment.yaml",
+    "reassessment.md",
+    "verification-report.yaml",
+    "verification-report.md",
+    "run-state.yaml",
 ]
 
 

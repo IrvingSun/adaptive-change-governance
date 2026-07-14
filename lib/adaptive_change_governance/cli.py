@@ -15,12 +15,14 @@ from .human_review import HumanReviewGate, ReviewError
 from .intent_model import load_intent_file
 from .next_action import NextActionPlanner
 from .progress import ProgressTracker
+from .reassessment import ReassessmentRunner
 from .repository_analyzer import RepositoryAnalyzer
 from .risk_evaluator import RiskEvaluator
 from .run_status import RunStatusRenderer
 from .run_retention import cleanup_runs, render_cleanup_summary
 from .schema_validator import ValidationError, validate_all
 from .technical_plan import TechnicalPlanError, TechnicalPlanGate
+from .verification_report import VerificationReportGenerator
 from .workflow_composer import WorkflowComposer
 
 
@@ -47,6 +49,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--approve-technical-plan", help="Approve a generated technical plan")
     parser.add_argument("--generate-analysis-report", help="Generate analysis-report.yaml/md for an existing run id or run directory")
     parser.add_argument("--verify-diff", help="Verify current git diff against approved technical plan and low-risk intent")
+    parser.add_argument("--reassess", help="Reassess an existing run against the current repository state")
+    parser.add_argument("--generate-verification-report", help="Generate verification-report.yaml/md for an existing run")
     parser.add_argument("--generate-agent-tasks", help="Generate agent-tasks.yaml/md after workflow approval")
     parser.add_argument("--review-agent-tasks", help="Print generated agent task plan")
     parser.add_argument("--start-step", help="Mark one workflow module as in progress for an existing run id or run directory")
@@ -106,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
         return _status(root, Path(args.output), args.status, workflow_modules)
 
     if args.next:
-        return _next(root, Path(args.output), args.next, args, workflow_modules)
+        return _next(root, Path(args.output), args.next, args, project_risk, guardrails, workflow_modules)
 
     if args.review_decision:
         return _review_decision(root, Path(args.output), args.review_decision, args, workflow_modules)
@@ -132,6 +136,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.verify_diff:
         return _verify_diff(root, Path(args.output), args.verify_diff)
 
+    if args.reassess:
+        return _reassess(root, Path(args.output), args.reassess, project_risk, guardrails, workflow_modules)
+
+    if args.generate_verification_report:
+        return _generate_verification_report(root, Path(args.output), args.generate_verification_report)
+
     if args.generate_agent_tasks:
         return _generate_agent_tasks(root, Path(args.output), args.generate_agent_tasks, workflow_modules)
 
@@ -152,6 +162,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cleanup_runs:
         return _cleanup_runs(root, Path(args.output), project_risk, args.cleanup_dry_run)
+
+    if args.mode == "reassess" and args.run_id:
+        return _reassess(root, Path(args.output), args.run_id, project_risk, guardrails, workflow_modules)
 
     if args.mode != "assess":
         return _guarded_mode(args.mode)
@@ -218,7 +231,7 @@ def _status(root: Path, output_root: Path, run_id: str, workflow_modules: dict) 
     return 0
 
 
-def _next(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, workflow_modules: dict) -> int:
+def _next(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, project_risk: dict, guardrails: dict, workflow_modules: dict) -> int:
     run_dir = _resolve_run_dir(root, output_root, run_id)
     if not run_dir.exists():
         print(f"ERROR: run not found: {run_id}")
@@ -241,6 +254,10 @@ def _next(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, 
         return _generate_agent_tasks(root, output_root, run_id, workflow_modules)
     if action == "propose_technical_plan":
         return _propose_technical_plan(root, output_root, run_id, workflow_modules)
+    if action == "reassess":
+        return _reassess(root, output_root, run_id, project_risk, guardrails, workflow_modules)
+    if action == "generate_verification_report":
+        return _generate_verification_report(root, output_root, run_id)
     print("BLOCKED: unsupported automatic next action")
     return 3
 
@@ -412,6 +429,39 @@ def _verify_diff(root: Path, output_root: Path, run_id: str) -> int:
     print(f"Status: {report.get('status')}")
     if report.get("errors"):
         print("Errors: " + "; ".join(report["errors"]))
+    return 0 if report.get("status") == "pass" else 3
+
+
+def _reassess(root: Path, output_root: Path, run_id: str, project_risk: dict, guardrails: dict, workflow_modules: dict) -> int:
+    run_dir = _resolve_run_dir(root, output_root, run_id)
+    if not run_dir.exists():
+        print(f"ERROR: run not found: {run_id}")
+        return 2
+    try:
+        report = ReassessmentRunner(root, project_risk, guardrails, workflow_modules).run(run_dir)
+    except (ConfigError, FileNotFoundError, KeyError) as exc:
+        print(f"ERROR: {exc}")
+        return 2
+    _write_run_state(run_dir, "REASSESSING" if report.get("reassessment", {}).get("requires_human_reapproval") else "VERIFYING")
+    reassessment = report.get("reassessment", {})
+    print(f"Reassessment generated: {run_dir / 'reassessment.yaml'}")
+    print(f"Previous level: {reassessment.get('previous_level')}")
+    print(f"New level: {reassessment.get('new_level')}")
+    print(f"Requires human reapproval: {reassessment.get('requires_human_reapproval')}")
+    return 0
+
+
+def _generate_verification_report(root: Path, output_root: Path, run_id: str) -> int:
+    run_dir = _resolve_run_dir(root, output_root, run_id)
+    if not run_dir.exists():
+        print(f"ERROR: run not found: {run_id}")
+        return 2
+    report = VerificationReportGenerator().generate(run_dir)
+    _write_run_state(run_dir, "COMPLETED" if report.get("status") == "pass" else "FAILED_VERIFICATION")
+    print(f"Verification report generated: {run_dir / 'verification-report.yaml'}")
+    print(f"Status: {report.get('status')}")
+    if report.get("blockers"):
+        print("Blockers: " + "; ".join(report["blockers"]))
     return 0 if report.get("status") == "pass" else 3
 
 
@@ -588,6 +638,14 @@ def _load_optional_yaml(path: Path) -> dict:
     if not path.exists():
         return {"version": 1, "schemas": {}}
     return load_yaml(path)
+
+
+def _write_run_state(run_dir: Path, state: str) -> None:
+    dump_yaml(run_dir / "run-state.yaml", {
+        "version": 1,
+        "state": state,
+        "updated_at": datetime.now().isoformat(),
+    })
 
 
 def _project_root() -> Path:
