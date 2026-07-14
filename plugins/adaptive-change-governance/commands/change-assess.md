@@ -77,6 +77,7 @@ change-assess --propose-technical-plan <run_id>
 change-assess --review-technical-plan <run_id>
 change-assess --approve-technical-plan <run_id>
 change-assess --check-gate <run_id> --stage implementation
+change-assess --verify-diff <run_id>
 ```
 
 Do not modify business code until the implementation gate returns `GATE OK`.
@@ -107,6 +108,7 @@ Hard constraints:
 - Low-risk menu or copy changes should stay lightweight unless strong code evidence shows data, interface, permission, or deletion impact.
 - File importance from `file_risk` must influence routing: database, auth, migration, scheduler, and API files are higher impact than UI copy files even when the diff size is similar.
 - Distinguish inherent file importance from effective change risk. A comment-only change in a high-risk file may stay lightweight only when structured intent says `change_nature: comment_only`, and the implementation diff must later prove that no executable behavior changed.
+- After implementation, run `change-assess --verify-diff <run_id>` to produce `diff-verification.yaml/md`; blocked diff verification must stop handoff.
 - For L3/L4 workflows, generate `agent-tasks.yaml` and use subagents for narrow read-only or review-only tasks before implementation.
 - Subagents must report completed workflow modules with `change-assess --complete-step`; the progress status bar must show completed state, elapsed time, and artifact path.
 - Workflow approval must happen before technical planning.

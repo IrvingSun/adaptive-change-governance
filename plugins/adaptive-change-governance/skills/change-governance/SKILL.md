@@ -23,6 +23,7 @@ Required behavior:
 - Treat weak-only guardrail signals as candidates for confirmation, not as hard minimum level triggers.
 - Consider configured `file_risk` when explaining risk: small edits in database/auth/scheduler/API files can require heavier workflow than similar-sized UI text edits.
 - Distinguish inherent file risk from effective change risk. If the model classifies a high-risk file change as comment-only or docs-only, record that as intent and require later diff verification.
+- After implementation, run `change-assess --verify-diff <run_id>` before final handoff. If it reports blocked, stop and present the blocking diff evidence.
 - Stop after `workflow-plan.md` until human approval is present.
 - For `analysis_only` or `decision_support`, run `change-assess --generate-analysis-report <run_id>` and stop after presenting the analysis report unless the user opens a new implementation request.
 - Do not generate a technical plan before workflow approval.
@@ -43,6 +44,7 @@ change-assess --propose-technical-plan <run_id>
 change-assess --review-technical-plan <run_id>
 change-assess --approve-technical-plan <run_id>
 change-assess --check-gate <run_id> --stage implementation
+change-assess --verify-diff <run_id>
 change-assess --complete-step <run_id> --module dependency_analysis --artifact dependency-analysis.yaml --agent dependency-analyzer
 change-assess --review-decision <run_id> --decision reassess --comment "reason"
 ```

@@ -120,6 +120,7 @@ bin/change-assess --propose-technical-plan <run_id>
 bin/change-assess --review-technical-plan <run_id>
 bin/change-assess --approve-technical-plan <run_id>
 bin/change-assess --check-gate <run_id> --stage implementation
+bin/change-assess --verify-diff <run_id>
 ```
 
 For L3/L4 workflows, `agent-tasks.yaml` marks subagents as required. The task plan separates read-only fact gathering, dependency/data impact review, adversarial review, technical-plan review, and implementation-after-gate work. Subagents must cite evidence and may not edit business code unless assigned implementation mode after `GATE OK`.
@@ -140,6 +141,10 @@ The technical-plan gate writes:
 - `approved-technical-plan.yaml`
 - `approved-technical-plan.md`
 - `.technical-plan-approved`
+- `diff-verification.yaml`
+- `diff-verification.md`
+
+Use `--verify-diff` after implementation to compare the current Git diff with the approved technical plan. If low-risk intent lowered file risk, diff verification checks for executable-looking changes before the implementation gate can pass.
 
 Implementation must remain blocked until `--check-gate <run_id> --stage implementation` returns `GATE OK`.
 

@@ -152,6 +152,11 @@ class TechnicalPlanGate:
                 errors.append("technical plan has not been approved")
             if not (run_dir / "approved-technical-plan.yaml").exists():
                 errors.append("approved-technical-plan.yaml is missing")
+            diff_path = run_dir / "diff-verification.yaml"
+            if diff_path.exists():
+                diff = load_yaml(diff_path)
+                if diff.get("status") != "pass":
+                    errors.append("diff verification is blocked")
         else:
             errors.append("stage must be technical_plan or implementation")
         return errors

@@ -758,6 +758,107 @@ class Phase1Test(unittest.TestCase):
         finally:
             shutil.rmtree(temp)
 
+    def test_diff_verification_blocks_executable_change_for_comment_only_intent(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            shutil.copytree(ROOT / ".ai-governance", temp / ".ai-governance", ignore=shutil.ignore_patterns("runs"))
+            shutil.copytree(ROOT / "lib", temp / "lib")
+            shutil.copytree(ROOT / "bin", temp / "bin")
+            (temp / "app").mkdir()
+            database = temp / "app/database.py"
+            database.write_text("# old comment\nDATABASE_NAME = 'main'\n", encoding="utf-8")
+            intent_path = temp / "intent.yaml"
+            intent_path.write_text(
+                "\n".join([
+                    "version: 1",
+                    "change_kind: comment_change",
+                    "change_nature: comment_only",
+                    "summary: update a database.py comment only",
+                    "confidence: high",
+                    "request_goal:",
+                    "  type: implementation",
+                    "  requires_code_change: true",
+                    "  default_stop_gate: workflow_plan_approval",
+                    "scope:",
+                    "  included: [comment only]",
+                    "  excluded: [executable code]",
+                    "  unknowns: [diff must confirm comment-only]",
+                    "risk_hints:",
+                    "  data_operation: false",
+                    "  database_schema_change: false",
+                    "  public_interface_change: false",
+                    "  permission_change: false",
+                    "  security_change: false",
+                    "  financial_change: false",
+                ]),
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "init"], cwd=temp, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "add", "."], cwd=temp, check=True, capture_output=True, text=True)
+            subprocess.run(
+                ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "baseline"],
+                cwd=temp,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(temp / "lib")
+            assess = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "修改 app/database.py 中的一行注释", "--intent-file", str(intent_path)],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(assess.returncode, 0, assess.stderr + assess.stdout)
+            run_dir = next((temp / ".ai-governance/runs").iterdir())
+            for command in (
+                [sys.executable, str(temp / "bin/change-assess"), "--approve-workflow", run_dir.name],
+                [sys.executable, str(temp / "bin/change-assess"), "--propose-technical-plan", run_dir.name],
+                [sys.executable, str(temp / "bin/change-assess"), "--approve-technical-plan", run_dir.name],
+            ):
+                result = subprocess.run(command, cwd=temp, env=env, check=False, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
+            database.write_text("# new comment\nDATABASE_NAME = 'main'\n", encoding="utf-8")
+            pass_result = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--verify-diff", run_dir.name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(pass_result.returncode, 0, pass_result.stderr + pass_result.stdout)
+            self.assertIn("Status: pass", pass_result.stdout)
+            self.assertEqual("pass", load_yaml(run_dir / "diff-verification.yaml")["status"])
+
+            database.write_text("# new comment\nDATABASE_NAME = 'other'\n", encoding="utf-8")
+            blocked = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--verify-diff", run_dir.name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(blocked.returncode, 3, blocked.stderr + blocked.stdout)
+            self.assertIn("low-risk intent diff includes executable-looking changes", blocked.stdout)
+            gate = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--check-gate", run_dir.name, "--stage", "implementation"],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(gate.returncode, 3, gate.stderr + gate.stdout)
+            self.assertIn("diff verification is blocked", gate.stdout)
+        finally:
+            shutil.rmtree(temp)
+
     def test_cli_review_workflow_lists_user_actions(self):
         temp = Path(tempfile.mkdtemp())
         try:
