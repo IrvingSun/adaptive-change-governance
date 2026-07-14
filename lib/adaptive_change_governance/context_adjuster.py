@@ -4,7 +4,7 @@ from copy import deepcopy
 from typing import Any
 
 
-EXCLUSION_GROUPS = {
+EXCLUSION_GROUPS: dict[str, dict[str, Any]] = {
     "database": {
         "terms": ["database", "db", "sql", "schema", "数据", "数据库", "表结构"],
         "fields": {

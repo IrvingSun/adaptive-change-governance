@@ -12,6 +12,23 @@ class TechnicalPlanError(ValueError):
     pass
 
 
+# Guardrail-required modules that produce analysis evidence and must be
+# completed (via --complete-step with an artifact) before the technical plan
+# can be approved. Execution-stage modules (dry_run, manual_approval, tests,
+# release steps) are gated later and stay "planned" here.
+PRE_PLAN_ANALYSIS_MODULES = {
+    "requirement_confirmation",
+    "business_rule_confirmation",
+    "dependency_analysis",
+    "data_impact_analysis",
+    "threat_analysis",
+    "compatibility_analysis",
+    "consumer_analysis",
+    "protocol_verification",
+    "failure_mode_analysis",
+}
+
+
 @dataclass
 class TechnicalPlanGate:
     workflow_modules: dict[str, Any]
@@ -61,7 +78,7 @@ class TechnicalPlanGate:
                 "corrections": context["corrections"],
             },
             "module_coverage": {
-                module: self._module_coverage(module)
+                module: self._module_coverage(module, self._completed_steps(run_dir))
                 for module in required
             },
             "implementation_plan": {
@@ -128,6 +145,7 @@ class TechnicalPlanGate:
         plan = load_yaml(run_dir / "technical-plan.yaml")
         approved_workflow = load_yaml(run_dir / "approved-workflow.yaml")
         errors = self.validate(plan, approved_workflow)
+        errors.extend(self._unfinished_guardrail_analysis(run_dir))
         if errors:
             raise TechnicalPlanError("technical plan validation failed: " + "; ".join(errors))
         approval = plan.setdefault("approval", {})
@@ -170,10 +188,12 @@ class TechnicalPlanGate:
         for module in required:
             item = coverage.get(module)
             if not isinstance(item, dict):
-                errors.append(f"required module {module} is not covered")
+                errors.append(f"required module {module} is missing from module_coverage")
                 continue
-            if item.get("status") not in {"covered", "not_applicable_with_evidence"}:
-                errors.append(f"required module {module} must be covered")
+            if item.get("status") not in {"covered", "planned", "not_applicable_with_evidence"}:
+                errors.append(f"required module {module} must be covered, planned, or not_applicable_with_evidence")
+            if item.get("status") == "covered" and not item.get("evidence"):
+                errors.append(f"required module {module} claims covered without evidence")
             if not item.get("evidence") and not item.get("decision"):
                 errors.append(f"required module {module} needs evidence or decision")
         prohibited = set(approved_workflow.get("workflow_recommendation", {}).get("prohibited", []))
@@ -213,6 +233,21 @@ class TechnicalPlanGate:
             lines.append(f"- `{command}`")
         return "\n".join(lines) + "\n"
 
+    def _unfinished_guardrail_analysis(self, run_dir: Path) -> list[str]:
+        risk_path = run_dir / "risk-assessment.yaml"
+        if not risk_path.exists():
+            return []
+        risk = load_yaml(risk_path)
+        completed = self._completed_steps(run_dir)
+        errors = []
+        for module in risk.get("required_by_guardrails", []):
+            if module in PRE_PLAN_ANALYSIS_MODULES and module not in completed:
+                errors.append(
+                    f"hard-guardrail analysis module {module} is not completed; "
+                    f"run change-assess --complete-step {run_dir.name} --module {module} --artifact <artifact> first"
+                )
+        return errors
+
     def _require_workflow_approved(self, run_dir: Path) -> None:
         if not (run_dir / ".workflow-approved").exists() or not (run_dir / "approved-workflow.yaml").exists():
             raise TechnicalPlanError("workflow approval is required before technical plan")
@@ -234,13 +269,36 @@ class TechnicalPlanGate:
             },
         }
 
-    def _module_coverage(self, module: str) -> dict[str, Any]:
-        meta = self.workflow_modules.get("modules", {}).get(module, {})
+    def _completed_steps(self, run_dir: Path) -> dict[str, dict[str, Any]]:
+        path = run_dir / "progress.yaml"
+        if not path.exists():
+            return {}
+        progress = load_yaml(path)
         return {
-            "status": "covered",
+            step.get("id"): step
+            for step in progress.get("steps", [])
+            if step.get("status") == "done"
+        }
+
+    def _module_coverage(self, module: str, completed: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        meta = self.workflow_modules.get("modules", {}).get(module, {})
+        step = completed.get(module)
+        if step:
+            artifacts = [str(item) for item in step.get("artifacts") or []]
+            evidence = [f"FACT: {module} completed" + (f" with artifact(s): {', '.join(artifacts)}" if artifacts else " via --complete-step") + "."]
+            return {
+                "status": "covered",
+                "output": meta.get("output", "unknown"),
+                "evidence": evidence,
+                "artifacts": artifacts,
+                "decision": meta.get("description", module),
+            }
+        return {
+            "status": "planned",
             "output": meta.get("output", "unknown"),
-            "evidence": [f"DECISION: {module} must be addressed before implementation."],
-            "decision": meta.get("description", module),
+            "evidence": [],
+            "artifacts": [],
+            "decision": f"PLAN: {meta.get('description', module)}; complete with change-assess --complete-step <run_id> --module {module}.",
         }
 
     def _candidate_file_changes(self, evidence: dict[str, Any]) -> list[dict[str, str]]:

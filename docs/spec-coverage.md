@@ -204,9 +204,14 @@ Implemented after the initial spec:
 - Agent task generation for L3/L4 workflows.
 - Subagent completion tracking with elapsed time and artifact path.
 - Artifact schema validation before marking subagent steps complete.
-- Diff verification for low-risk intent and approved technical plan scope.
+- Diff verification for low-risk intent and approved technical plan scope; diffs against HEAD (staged included), scans untracked files, and excludes `.ai-governance/runs/` artifacts.
 - `--status` run dashboard.
 - `--next` next-action planner with safe execution mode.
+- Guardrail suppression consistency: `requires_code_change: false` only disarms guardrails for analysis/decision goals, never for implementation or planning goals.
+- Honest technical-plan module coverage (`covered` only with completed progress steps; guardrail analysis modules block plan approval until completed).
+- Automatic `.ai-governance/runs/.gitignore` in `gitignored` audit mode.
+- Claude Code `PreToolUse` hook enforcing the implementation gate and protecting gate-state files (`ACG_HOOK_MODE=enforce|warn|off`).
+- Plugin runtime sync script (`scripts/sync-plugin.sh`) with drift-detection tests, mypy config, and GitHub Actions CI.
 
 ## Known Non-Goals Still Respected
 

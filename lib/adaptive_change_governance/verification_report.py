@@ -77,7 +77,7 @@ class VerificationReportGenerator:
         dump_yaml(run_dir / "verification-report.yaml", report)
         (run_dir / "verification-report.md").write_text(self.render_markdown(report), encoding="utf-8")
         if report["status"] == "pass":
-            (run_dir / ".verification-complete").write_text(report["created_at"] + "\n", encoding="utf-8")
+            (run_dir / ".verification-complete").write_text(str(report["created_at"]) + "\n", encoding="utf-8")
         return report
 
     def render_markdown(self, report: dict[str, Any]) -> str:

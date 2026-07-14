@@ -119,7 +119,8 @@ Hard constraints:
 - Low-risk menu or copy changes should stay lightweight unless strong code evidence shows data, interface, permission, or deletion impact.
 - File importance from `file_risk` must influence routing: database, auth, migration, scheduler, and API files are higher impact than UI copy files even when the diff size is similar.
 - Distinguish inherent file importance from effective change risk. A comment-only change in a high-risk file may stay lightweight only when structured intent says `change_nature: comment_only`, and the implementation diff must later prove that no executable behavior changed.
-- After implementation, run `change-assess --verify-diff <run_id>` to produce `diff-verification.yaml/md`; blocked diff verification must stop handoff.
+- After implementation, run `change-assess --verify-diff <run_id>` to produce `diff-verification.yaml/md`; it diffs against HEAD (staged changes included) and scans untracked files. Blocked diff verification must stop handoff.
+- Technical-plan approval is blocked while hard-guardrail analysis modules are unfinished; complete them with `--complete-step` before `--approve-technical-plan`.
 - After implementation, run `change-assess --reassess <run_id>` and `change-assess --generate-verification-report <run_id>` before final handoff.
 - For L3/L4 workflows, generate `agent-tasks.yaml` and use subagents for narrow read-only or review-only tasks before implementation.
 - Subagents must report completed workflow modules with `change-assess --complete-step`; the progress status bar must show completed state, elapsed time, and artifact path.

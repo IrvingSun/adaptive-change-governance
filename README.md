@@ -129,6 +129,8 @@ File risk has two levels:
 - `highest_level`: inherent file importance from `file_risk` rules plus semantic file role inference.
 - `effective_level`: risk after considering structured change intent. For example, a comment-only change in `app/database.py` keeps `highest_level: high` but may route with `effective_level: low`, while adding an UNKNOWN requiring the implementation diff to prove the change is comment-only.
 
+Technical-plan module coverage is honest, not automatic: modules completed via `--complete-step` are marked `covered` with their artifacts as evidence; everything else stays `planned`. Approving the technical plan is blocked while hard-guardrail analysis modules (for example `business_rule_confirmation`, `threat_analysis`, `dependency_analysis`) are still unfinished — complete them with `--complete-step` first.
+
 After workflow approval, generate and approve the technical plan before implementation:
 
 ```bash
@@ -178,12 +180,12 @@ The technical-plan gate writes:
 - `verification-report.md`
 - `run-state.yaml`
 
-Use `--verify-diff` after implementation to compare the current Git diff with the approved technical plan. If low-risk intent lowered file risk, diff verification checks for executable-looking changes before the implementation gate can pass.
+Use `--verify-diff` after implementation to compare the working tree against the approved technical plan. Verification diffs against `HEAD`, so staged changes stay visible, and untracked files are scanned as additions; the tool's own `.ai-governance/runs/` artifacts are excluded. If low-risk intent lowered file risk, diff verification checks for executable-looking changes before the implementation gate can pass.
 Use `--reassess` after implementation to rescan the current repository and compare the new risk against the initial assessment. Use `--generate-verification-report` to produce the final MVP verification report.
 
 Implementation must remain blocked until `--check-gate <run_id> --stage implementation` returns `GATE OK`.
 
-Run artifacts under `.ai-governance/runs/` are local audit and gate-state files. They are ignored by Git by default. Use the retention policy in `.ai-governance/project-risk.yaml` to control local history size:
+Run artifacts under `.ai-governance/runs/` are local audit and gate-state files. When `audit_retention.audit_mode` is `gitignored` (the default), the first assessment writes `.ai-governance/runs/.gitignore` so run artifacts never enter Git or pollute diff verification. Use the retention policy in `.ai-governance/project-risk.yaml` to control local history size:
 
 ```yaml
 audit_retention:
@@ -229,6 +231,24 @@ After install, use:
 ```
 
 The plugin contributes a `change-assess` executable to Claude Code's Bash PATH. It requires `PyYAML` in the Python environment used by `python3`.
+
+The plugin also registers a `PreToolUse` hook (`hooks/implementation_gate.py`) that enforces the implementation gate at the harness level: while a governance run with an implementation goal has not passed `--check-gate --stage implementation`, `Edit`/`Write` tool calls on project files are denied, and gate-state files under `.ai-governance/runs/` (approval markers, `human-review.yaml`, verification reports) may only be written through the CLI. Set `ACG_HOOK_MODE=warn` to log instead of block, or `ACG_HOOK_MODE=off` to disable. Known residual risk: the hook intercepts file-editing tools only — shell-based edits (`sed`, `tee`, ...) are not intercepted, so the hook raises the bypass cost but is not a sandbox.
+
+## Development
+
+The root `lib/`, `bin/`, and `.ai-governance/*.yaml` are the single source of truth; `plugins/adaptive-change-governance/` ships a copy. After changing them, run:
+
+```bash
+scripts/sync-plugin.sh
+```
+
+`test/test_phase1.py` fails if the copies drift. CI (`.github/workflows/ci.yml`) runs `mypy` (see `mypy.ini`) and the test suite:
+
+```bash
+python3 -m pip install PyYAML mypy types-PyYAML
+mypy lib/adaptive_change_governance plugins/adaptive-change-governance/hooks/implementation_gate.py
+python3 test/test_phase1.py
+```
 
 ## Codex plugin
 

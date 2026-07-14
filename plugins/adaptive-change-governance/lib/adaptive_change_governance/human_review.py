@@ -41,7 +41,7 @@ class HumanReviewGate:
         required = set(original_required)
         optional = set(rec.get("optional_modules", []))
         hard_required = set(risk.get("required_by_guardrails", []))
-        level_required = set(LEVEL_MODULES.get(risk.get("final_level"), []))
+        level_required = set(LEVEL_MODULES.get(str(risk.get("final_level", "")), []))
         non_removable = hard_required | level_required
 
         changes = review.get("module_changes", {})

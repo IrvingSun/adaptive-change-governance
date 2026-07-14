@@ -165,7 +165,7 @@ class WorkflowComposer:
         return skipped
 
     def _human_gates(self, risk: dict[str, Any], request_goal: dict[str, Any]) -> list[str]:
-        if request_goal.get("requires_code_change") is False:
+        if request_goal.get("type") in {"analysis_only", "decision_support"}:
             return [request_goal.get("default_stop_gate", "analysis_complete")]
         gates = list(self.project_risk.get("default_human_gates", []))
         if "workflow_plan_approval" not in gates:

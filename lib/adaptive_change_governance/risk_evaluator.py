@@ -94,7 +94,12 @@ class RiskEvaluator:
         }
 
     def _triggered_guardrails(self, evidence: dict[str, Any], details: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
-        if evidence.get("request", {}).get("request_goal", {}).get("requires_code_change") is False:
+        # Guardrail suppression is only valid for goals that stop at an
+        # analysis/decision gate. planning_only keeps guardrails so required
+        # risk modules reach the technical plan, and a contradictory
+        # implementation goal must never disarm them.
+        goal = evidence.get("request", {}).get("request_goal", {})
+        if goal.get("type") in {"analysis_only", "decision_support"} and goal.get("requires_code_change") is False:
             return []
         facts = self._fact_index(evidence)
         strong_ids = {item["id"] for item in details or [] if item.get("strength") == "strong"}
@@ -179,7 +184,7 @@ class RiskEvaluator:
         triggered: list[dict[str, Any]],
         dimensions: dict[str, int],
     ) -> dict[str, Any]:
-        triggered_ids = {item.get("id") for item in triggered}
+        triggered_ids = {str(item["id"]) for item in triggered}
         return {
             "dimension_explanations": self._dimension_explanations(evidence, dimensions),
             "guardrail_evaluations": self._guardrail_evaluations(details, triggered_ids),

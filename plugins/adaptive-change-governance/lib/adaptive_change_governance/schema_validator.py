@@ -99,7 +99,7 @@ def validate_risk_calibration(data: dict[str, Any]) -> None:
     if data.get("version") != 1:
         raise ValidationError("risk-calibration.yaml version must be 1")
     thresholds = _require_mapping(data, "level_thresholds", "risk-calibration.yaml")
-    previous = 0
+    previous: float = 0
     for key in ("L2", "L3", "L4"):
         value = thresholds.get(key)
         if not isinstance(value, (int, float)) or value <= previous:

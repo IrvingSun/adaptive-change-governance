@@ -53,8 +53,10 @@ def load_intent_file(path: Path) -> dict[str, Any]:
 def normalize_intent(intent: dict[str, Any] | None) -> dict[str, Any]:
     if not intent:
         return {}
-    scope = intent.get("scope") if isinstance(intent.get("scope"), dict) else {}
-    risk = intent.get("risk_hints") if isinstance(intent.get("risk_hints"), dict) else {}
+    scope_value = intent.get("scope")
+    scope: dict[str, Any] = scope_value if isinstance(scope_value, dict) else {}
+    risk_value = intent.get("risk_hints")
+    risk: dict[str, Any] = risk_value if isinstance(risk_value, dict) else {}
     request_goal = _normalize_request_goal(intent.get("request_goal"), intent)
     normalized = {
         "version": intent.get("version", 1),
@@ -120,12 +122,18 @@ def _normalize_request_goal(value: Any, intent: dict[str, Any]) -> dict[str, Any
     requires = goal.get("requires_code_change", None)
     if requires not in {True, False}:
         requires = _requires_code_change(goal_type)
+    rationale = str(goal.get("rationale", "") or _goal_rationale(goal_type))
+    if goal_type == "implementation" and requires is False:
+        # Contradictory intent must not suppress guardrails: an implementation
+        # goal always requires code change, so the flag is corrected here.
+        requires = True
+        rationale += " CORRECTION: requires_code_change=false contradicts request_goal.type=implementation and was ignored."
     stop_gate = str(goal.get("default_stop_gate", "") or "").strip() or GOAL_STOP_GATES[goal_type]
     return {
         "type": goal_type,
         "requires_code_change": requires,
         "default_stop_gate": stop_gate,
-        "rationale": str(goal.get("rationale", "") or _goal_rationale(goal_type)),
+        "rationale": rationale,
     }
 
 

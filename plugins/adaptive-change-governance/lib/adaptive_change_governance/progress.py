@@ -31,7 +31,7 @@ class ProgressTracker:
 
     def initialize(self, run_dir: Path, modules: list[str], current: str | None = None) -> dict[str, Any]:
         now = _now()
-        steps = []
+        steps: list[dict[str, Any]] = []
         for module in modules:
             status = "in_progress" if module == current else "pending"
             steps.append({

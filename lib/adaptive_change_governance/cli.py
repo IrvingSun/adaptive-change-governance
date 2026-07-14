@@ -191,6 +191,7 @@ def main(argv: list[str] | None = None) -> int:
 
     run_dir = _run_dir(root / args.output, request)
     run_dir.mkdir(parents=True, exist_ok=False)
+    _ensure_runs_gitignore(root / args.output, project_risk)
     (run_dir / "request.md").write_text(f"# Request\n\n{request}\n", encoding="utf-8")
     if intent:
         dump_yaml(run_dir / "change-intent.yaml", intent)
@@ -667,6 +668,14 @@ def _load_optional_yaml(path: Path) -> dict:
     if not path.exists():
         return {"version": 1, "schemas": {}}
     return load_yaml(path)
+
+
+def _ensure_runs_gitignore(output_root: Path, project_risk: dict) -> None:
+    if project_risk.get("audit_retention", {}).get("audit_mode", "gitignored") != "gitignored":
+        return
+    gitignore = output_root / ".gitignore"
+    if not gitignore.exists():
+        gitignore.write_text("*\n", encoding="utf-8")
 
 
 def _write_run_state(run_dir: Path, state: str) -> None:

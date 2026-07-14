@@ -44,7 +44,7 @@ def evaluate_file_risk(
 ) -> dict[str, Any]:
     rules = project_risk.get("file_risk", [])
     intent = intent or {}
-    matches = []
+    matches: list[dict[str, Any]] = []
     for path in paths:
         for rule in rules:
             if not isinstance(rule, dict):
@@ -74,7 +74,7 @@ def evaluate_file_risk(
             "confidence": str(fact.get("confidence", "unknown")),
             "evidence_strength": str(fact.get("strength", "weak")),
         })
-    inherent = max((item["score"] for item in matches), default=1)
+    inherent = max((int(item["score"]) for item in matches), default=1)
     effective = _effective_score(inherent, intent)
     constraints = []
     if effective < inherent:
@@ -88,7 +88,7 @@ def evaluate_file_risk(
         "effective_score": effective,
         "risk_adjustment": "lowered_by_change_nature" if effective < inherent else "none",
         "constraints": constraints,
-        "matches": sorted(matches, key=lambda item: (-item["score"], item["path"], item["pattern"])),
+        "matches": sorted(matches, key=lambda item: (-int(item["score"]), str(item["path"]), str(item["pattern"]))),
     }
 
 

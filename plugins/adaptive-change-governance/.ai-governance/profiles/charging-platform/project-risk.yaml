@@ -53,6 +53,52 @@ default_human_gates:
   - technical_plan_approval
   - production_change_approval
 
+audit_retention:
+  audit_mode: gitignored
+  retain_latest: 20
+  retain_days: 30
+
+file_risk:
+  - pattern: "migrations/**"
+    level: critical
+    reason: database migration or data change
+  - pattern: "app/**/migrations/**"
+    level: critical
+    reason: database migration or data change
+  - pattern: "**/*.sql"
+    level: critical
+    reason: raw SQL can affect persisted data
+  - pattern: "app/database*.py"
+    level: high
+    reason: database connection or persistence infrastructure
+  - pattern: "app/**/database*.py"
+    level: high
+    reason: database connection or persistence infrastructure
+  - pattern: "app/*db*.py"
+    level: high
+    reason: database connection or persistence infrastructure
+  - pattern: "app/**/*db*.py"
+    level: high
+    reason: database connection or persistence infrastructure
+  - pattern: "app/api/auth.py"
+    level: high
+    reason: authentication and permission registry
+  - pattern: "app/engine/**"
+    level: high
+    reason: scheduler or background engine
+  - pattern: "app/api/**"
+    level: medium
+    reason: API surface
+  - pattern: "frontend/src/layouts/**"
+    level: low
+    reason: navigation and display shell
+  - pattern: "frontend/src/views/**"
+    level: low
+    reason: UI view layer
+  - pattern: "docs/**"
+    level: low
+    reason: documentation
+
 domain_keywords:
   billing:
     - billing
