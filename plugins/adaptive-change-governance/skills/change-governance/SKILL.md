@@ -33,9 +33,12 @@ Run artifacts in `.ai-governance/runs/` are local audit and gate-state files; ke
 change-assess --review-workflow <run_id>
 change-assess --approve-workflow <run_id> --add-required threat_analysis
 change-assess --add-context <run_id> --include "scope item" --exclude "out of scope" --user-fact "confirmed fact"
+change-assess --generate-agent-tasks <run_id>
 change-assess --propose-technical-plan <run_id>
 change-assess --review-technical-plan <run_id>
 change-assess --approve-technical-plan <run_id>
 change-assess --check-gate <run_id> --stage implementation
 change-assess --review-decision <run_id> --decision reassess --comment "reason"
 ```
+
+For L3/L4 workflows, use `agent-tasks.yaml` to split work into subagents. Read-only and review-only subagents must not modify files; implementation subagents require `GATE OK`.

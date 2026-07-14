@@ -92,15 +92,20 @@ After workflow approval, generate and approve the technical plan before implemen
 
 ```bash
 bin/change-assess --add-context <run_id> --include "..." --exclude "..." --user-fact "..."
+bin/change-assess --generate-agent-tasks <run_id>
 bin/change-assess --propose-technical-plan <run_id>
 bin/change-assess --review-technical-plan <run_id>
 bin/change-assess --approve-technical-plan <run_id>
 bin/change-assess --check-gate <run_id> --stage implementation
 ```
 
+For L3/L4 workflows, `agent-tasks.yaml` marks subagents as required. The task plan separates read-only fact gathering, dependency/data impact review, adversarial review, technical-plan review, and implementation-after-gate work. Subagents must cite evidence and may not edit business code unless assigned implementation mode after `GATE OK`.
+
 The technical-plan gate writes:
 
 - `run-context.yaml`
+- `agent-tasks.yaml`
+- `agent-tasks.md`
 - `technical-plan.yaml`
 - `technical-plan.md`
 - `approved-technical-plan.yaml`

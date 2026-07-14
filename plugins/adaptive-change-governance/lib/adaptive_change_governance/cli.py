@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from .agent_tasks import AgentTaskComposer, AgentTaskError
 from .config_loader import ConfigError, dump_yaml, load_yaml
 from .human_review import HumanReviewGate, ReviewError
 from .intent_model import load_intent_file
@@ -34,6 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--propose-technical-plan", help="Generate technical-plan.yaml/md after workflow approval")
     parser.add_argument("--review-technical-plan", help="Review technical plan coverage and approval commands")
     parser.add_argument("--approve-technical-plan", help="Approve a generated technical plan")
+    parser.add_argument("--generate-agent-tasks", help="Generate agent-tasks.yaml/md after workflow approval")
+    parser.add_argument("--review-agent-tasks", help="Print generated agent task plan")
     parser.add_argument("--check-gate", help="Check whether a run may enter a stage")
     parser.add_argument("--add-context", help="Add facts, corrections, or scope context to a run id or run directory")
     parser.add_argument("--cleanup-runs", action="store_true", help="Clean old .ai-governance/runs entries according to audit_retention policy")
@@ -96,6 +99,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.approve_technical_plan:
         return _approve_technical_plan(root, Path(args.output), args.approve_technical_plan, args, workflow_modules)
+
+    if args.generate_agent_tasks:
+        return _generate_agent_tasks(root, Path(args.output), args.generate_agent_tasks, workflow_modules)
+
+    if args.review_agent_tasks:
+        return _review_agent_tasks(root, Path(args.output), args.review_agent_tasks)
 
     if args.check_gate:
         return _check_gate(root, Path(args.output), args.check_gate, args, workflow_modules)
@@ -251,6 +260,7 @@ def _propose_technical_plan(root: Path, output_root: Path, run_id: str, workflow
     print(f"Technical plan generated: {run_dir / 'technical-plan.yaml'}")
     print(f"Validation: {plan.get('validation', {}).get('status')}")
     print(f"Review command: change-assess --review-technical-plan {run_dir.name}")
+    print(f"Agent task command: change-assess --generate-agent-tasks {run_dir.name}")
     return 0
 
 
@@ -279,6 +289,35 @@ def _approve_technical_plan(root: Path, output_root: Path, run_id: str, args: ar
         return 3
     print(f"Technical plan approved: {run_dir}")
     print(f"Gate command: change-assess --check-gate {run_dir.name} --stage implementation")
+    return 0
+
+
+def _generate_agent_tasks(root: Path, output_root: Path, run_id: str, workflow_modules: dict) -> int:
+    run_dir = _resolve_run_dir(root, output_root, run_id)
+    if not run_dir.exists():
+        print(f"ERROR: run not found: {run_id}")
+        return 2
+    try:
+        artifact = AgentTaskComposer(workflow_modules).generate(run_dir)
+    except (ConfigError, AgentTaskError) as exc:
+        print(f"BLOCKED: {exc}")
+        return 3
+    print(f"Agent tasks generated: {run_dir / 'agent-tasks.yaml'}")
+    print(f"Subagents required: {artifact.get('policy', {}).get('subagents_required')}")
+    print(f"Task count: {len(artifact.get('tasks', []))}")
+    return 0
+
+
+def _review_agent_tasks(root: Path, output_root: Path, run_id: str) -> int:
+    run_dir = _resolve_run_dir(root, output_root, run_id)
+    if not run_dir.exists():
+        print(f"ERROR: run not found: {run_id}")
+        return 2
+    path = run_dir / "agent-tasks.md"
+    if not path.exists():
+        print("ERROR: agent-tasks.md is missing; run --generate-agent-tasks first")
+        return 2
+    print(path.read_text(encoding="utf-8"), end="")
     return 0
 
 

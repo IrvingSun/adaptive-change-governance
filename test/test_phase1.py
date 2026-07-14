@@ -509,6 +509,54 @@ class Phase1Test(unittest.TestCase):
         finally:
             shutil.rmtree(temp)
 
+    def test_agent_tasks_are_generated_from_approved_workflow_level(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            shutil.copytree(ROOT / ".ai-governance", temp / ".ai-governance", ignore=shutil.ignore_patterns("runs"))
+            shutil.copytree(ROOT / "lib", temp / "lib")
+            shutil.copytree(ROOT / "bin", temp / "bin")
+            subprocess.run(["git", "init"], cwd=temp, check=True, capture_output=True, text=True)
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(temp / "lib")
+            assess = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "删除重复配置数据。"],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(assess.returncode, 0, assess.stderr + assess.stdout)
+            run_dir = next((temp / ".ai-governance/runs").iterdir())
+            approval = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--approve-workflow", run_dir.name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(approval.returncode, 0, approval.stderr + approval.stdout)
+            tasks = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--generate-agent-tasks", run_dir.name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(tasks.returncode, 0, tasks.stderr + tasks.stdout)
+            artifact = load_yaml(run_dir / "agent-tasks.yaml")
+            self.assertTrue(artifact["policy"]["subagents_required"])
+            task_ids = {task["id"] for task in artifact["tasks"]}
+            self.assertIn("code_fact_scan", task_ids)
+            self.assertIn("data_impact_analysis", task_ids)
+            self.assertIn("adversarial_review", task_ids)
+            self.assertIn("implementation_gate", task_ids)
+            self.assertTrue((run_dir / "agent-tasks.md").exists())
+        finally:
+            shutil.rmtree(temp)
+
     def test_cli_review_workflow_lists_user_actions(self):
         temp = Path(tempfile.mkdtemp())
         try:
