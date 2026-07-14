@@ -95,6 +95,24 @@ def validate_workflow_modules(data: dict[str, Any]) -> None:
             raise ValidationError(f"workflow module {module_id} requires description and output")
 
 
+def validate_risk_calibration(data: dict[str, Any]) -> None:
+    if data.get("version") != 1:
+        raise ValidationError("risk-calibration.yaml version must be 1")
+    thresholds = _require_mapping(data, "level_thresholds", "risk-calibration.yaml")
+    previous = 0
+    for key in ("L2", "L3", "L4"):
+        value = thresholds.get(key)
+        if not isinstance(value, (int, float)) or value <= previous:
+            raise ValidationError(f"risk-calibration.yaml.level_thresholds.{key} must be a number greater than the previous threshold")
+        previous = value
+    weights = data.get("dimension_weight_overrides", {})
+    if weights is not None and not isinstance(weights, dict):
+        raise ValidationError("risk-calibration.yaml.dimension_weight_overrides must be a mapping")
+    for key, value in (weights or {}).items():
+        if not isinstance(value, (int, float)) or value <= 0:
+            raise ValidationError(f"risk-calibration.yaml.dimension_weight_overrides.{key} must be a positive number")
+
+
 def validate_all(project_risk: dict[str, Any], guardrails: dict[str, Any], workflow_modules: dict[str, Any]) -> None:
     validate_project_risk(project_risk)
     validate_guardrails(guardrails)

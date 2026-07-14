@@ -1,0 +1,13 @@
+version: 1
+source: default-mvp-calibration
+
+level_thresholds:
+  L2: 15
+  L3: 27
+  L4: 40
+
+dimension_weight_overrides: {}
+
+notes:
+  - FACT: Default thresholds preserve the original MVP scoring behavior.
+  - INFERENCE: Teams can tune thresholds and weights from historical incidents and review outcomes.

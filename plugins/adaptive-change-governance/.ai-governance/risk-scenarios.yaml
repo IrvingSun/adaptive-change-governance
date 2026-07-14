@@ -1,0 +1,54 @@
+version: 1
+
+scenarios:
+  - id: menu-label-change
+    request: 把后台「群配置」相关的菜单修改为「业务群配置」
+    repository:
+      files:
+        frontend/src/layouts/BotLayout.vue: "<span>群配置</span>\n"
+        app/bot/handler.py: "def clean_group_config_cache():\n    sql = 'delete from cache_items where name = 群配置'\n    return {'api_schema': 'message'}\n"
+    expected:
+      level: L1
+      triggered_guardrails: []
+      absent_guardrails:
+        - destructive-database-operation
+        - public-interface-change
+
+  - id: database-comment-only
+    request: 修改 app/database.py 中的一行注释
+    intent:
+      change_kind: comment_change
+      change_nature: comment_only
+      risk_hints:
+        data_operation: false
+        database_schema_change: false
+        public_interface_change: false
+        permission_change: false
+        security_change: false
+        financial_change: false
+    repository:
+      files:
+        app/database.py: "# database connection name docs\nDATABASE_NAME = 'main'\n"
+    expected:
+      level: L1
+      triggered_guardrails: []
+
+  - id: refund-rounding
+    request: 调整退款金额保留两位小数的计算方式。
+    repository:
+      files:
+        app/billing/refund.py: "def refund_amount(value):\n    return round(value, 2)\n"
+    expected:
+      minimum_level: L3
+      triggered_guardrails:
+        - financial-calculation-change
+
+  - id: destructive-sql-delete
+    request: 删除重复的设备端口状态数据。
+    repository:
+      files:
+        migrations/20260714_cleanup_device_port_status.sql: "DELETE FROM device_port_status WHERE duplicated = true;\n"
+    expected:
+      level: L4
+      triggered_guardrails:
+        - destructive-database-operation

@@ -59,13 +59,15 @@ def render_risk_markdown(risk: dict[str, Any]) -> str:
 class RiskEvaluator:
     project_risk: dict[str, Any]
     guardrails: dict[str, Any]
+    calibration: dict[str, Any] | None = None
 
     def evaluate(self, evidence: dict[str, Any]) -> dict[str, Any]:
         triggered_details = self._triggered_guardrail_details(evidence)
         triggered = self._triggered_guardrails(evidence, triggered_details)
         weak_candidates = [item for item in triggered_details if item.get("strength") == "weak"]
         dimensions = self._score_dimensions(evidence, triggered)
-        weighted_score = round(sum(dimensions[key] * weight for key, weight in WEIGHTS.items()), 2)
+        weights = self._weights()
+        weighted_score = round(sum(dimensions[key] * weight for key, weight in weights.items()), 2)
         calculated_level = self._level_from_score(weighted_score)
         guardrail_minimum = self._minimum_guardrail_level(triggered)
         final_level = self._max_level(calculated_level, guardrail_minimum)
@@ -75,7 +77,8 @@ class RiskEvaluator:
         return {
             "version": 1,
             "risk_dimensions": dimensions,
-            "weights": WEIGHTS,
+            "weights": weights,
+            "calibration": self._calibration_summary(),
             "weighted_score": weighted_score,
             "baseline_level": self.project_risk["project"]["baseline_level"],
             "calculated_level": calculated_level,
@@ -235,7 +238,7 @@ class RiskEvaluator:
             explanations.append({
                 "dimension": name,
                 "score": score,
-                "weight": WEIGHTS.get(name),
+                "weight": self._weights().get(name),
                 "evidence": inputs.get(name, []),
                 "decision": self._dimension_decision(name, score),
             })
@@ -394,13 +397,44 @@ class RiskEvaluator:
         return bool(security & set(code.get("affected_domains", [])))
 
     def _level_from_score(self, score: float) -> str:
-        if score < 15:
+        thresholds = self._thresholds()
+        if score < thresholds["L2"]:
             return "L1"
-        if score < 27:
+        if score < thresholds["L3"]:
             return "L2"
-        if score < 40:
+        if score < thresholds["L4"]:
             return "L3"
         return "L4"
+
+    def _weights(self) -> dict[str, float]:
+        weights = dict(WEIGHTS)
+        overrides = self._calibration_section("dimension_weight_overrides")
+        for key, value in overrides.items():
+            if key in weights and isinstance(value, (int, float)):
+                weights[key] = float(value)
+        return weights
+
+    def _thresholds(self) -> dict[str, float]:
+        thresholds = {"L2": 15.0, "L3": 27.0, "L4": 40.0}
+        configured = self._calibration_section("level_thresholds")
+        for key in thresholds:
+            value = configured.get(key)
+            if isinstance(value, (int, float)):
+                thresholds[key] = float(value)
+        return thresholds
+
+    def _calibration_section(self, key: str) -> dict[str, Any]:
+        if not isinstance(self.calibration, dict):
+            return {}
+        value = self.calibration.get(key)
+        return value if isinstance(value, dict) else {}
+
+    def _calibration_summary(self) -> dict[str, Any]:
+        return {
+            "source": self.calibration.get("source", "default") if isinstance(self.calibration, dict) else "default",
+            "level_thresholds": self._thresholds(),
+            "dimension_weight_overrides": self._calibration_section("dimension_weight_overrides"),
+        }
 
     def _minimum_guardrail_level(self, triggered: list[dict[str, Any]]) -> str:
         level = "L1"

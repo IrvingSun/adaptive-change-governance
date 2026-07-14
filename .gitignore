@@ -3,4 +3,5 @@ __pycache__/
 **/__pycache__/
 *.pyc
 **/.ai-governance/runs/
+**/.ai-governance/risk-scenario-report.*
 .DS_Store

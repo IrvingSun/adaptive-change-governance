@@ -20,6 +20,14 @@ schemas:
     required:
       - version
       - modules
+  risk-calibration.yaml:
+    required:
+      - version
+      - level_thresholds
+  risk-scenarios.yaml:
+    required:
+      - version
+      - scenarios
   evidence-pack.yaml:
     required:
       - version

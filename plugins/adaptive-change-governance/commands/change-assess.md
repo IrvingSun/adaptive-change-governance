@@ -86,6 +86,7 @@ change-assess --verify-diff <run_id>
 change-assess --reassess <run_id>
 change-assess --generate-verification-report <run_id>
 change-assess --validate-artifact <run_id> --module dependency_analysis --artifact dependency-analysis.yaml
+change-assess --validate-risk-scenarios
 ```
 
 Do not modify business code until the implementation gate returns `GATE OK`.

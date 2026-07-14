@@ -54,6 +54,12 @@ For analysis-only or decision-support runs, generate the final analysis artifact
 bin/change-assess --generate-analysis-report <run_id>
 ```
 
+Validate the risk scoring calibration with the built-in scenario suite:
+
+```bash
+bin/change-assess --validate-risk-scenarios
+```
+
 Use the default industry-neutral profile for reusable governance. Use the optional charging profile when assessing charging platform changes:
 
 ```bash
@@ -73,6 +79,8 @@ The command writes an isolated run under `.ai-governance/runs/`:
 - `analysis-report.md` when generated
 - `review.md`
 - `human-review.yaml`
+
+Risk calibration is configured in `.ai-governance/risk-calibration.yaml`. Scenario expectations live in `.ai-governance/risk-scenarios.yaml`; validation writes `risk-scenario-report.yaml/md`.
 
 The tool stops at `workflow_plan_approval`. Review and approve from the CLI:
 

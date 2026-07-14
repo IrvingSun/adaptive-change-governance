@@ -13,11 +13,12 @@ sys.path.insert(0, str(ROOT / "lib"))
 
 from adaptive_change_governance.config_loader import load_yaml
 import adaptive_change_governance.cli as cli_module
+from adaptive_change_governance.context_adjuster import apply_user_context
 from adaptive_change_governance.human_review import HumanReviewGate, ReviewError
 from adaptive_change_governance.repository_analyzer import RepositoryAnalyzer
 from adaptive_change_governance.run_retention import cleanup_runs
 from adaptive_change_governance.risk_evaluator import RiskEvaluator
-from adaptive_change_governance.schema_validator import ValidationError, validate_all
+from adaptive_change_governance.schema_validator import ValidationError, validate_all, validate_risk_calibration
 from adaptive_change_governance.workflow_composer import WorkflowComposer
 
 
@@ -26,11 +27,13 @@ class Phase1Test(unittest.TestCase):
         self.project_risk = load_yaml(ROOT / ".ai-governance/project-risk.yaml")
         self.guardrails = load_yaml(ROOT / ".ai-governance/guardrails.yaml")
         self.modules = load_yaml(ROOT / ".ai-governance/workflow-modules.yaml")
+        self.risk_calibration = load_yaml(ROOT / ".ai-governance/risk-calibration.yaml")
         self.charging_project_risk = load_yaml(ROOT / ".ai-governance/profiles/charging-platform/project-risk.yaml")
         self.charging_guardrails = load_yaml(ROOT / ".ai-governance/profiles/charging-platform/guardrails.yaml")
 
     def test_config_files_validate(self):
         validate_all(self.project_risk, self.guardrails, self.modules)
+        validate_risk_calibration(self.risk_calibration)
         validate_all(self.charging_project_risk, self.charging_guardrails, self.modules)
 
     def test_bad_config_reports_clear_error(self):
@@ -44,6 +47,11 @@ class Phase1Test(unittest.TestCase):
         bad["audit_retention"] = {"audit_mode": "git", "retain_latest": 0, "retain_days": 30}
         with self.assertRaisesRegex(ValidationError, "audit_retention"):
             validate_all(bad, self.guardrails, self.modules)
+
+    def test_bad_risk_calibration_reports_clear_error(self):
+        bad = {"version": 1, "level_thresholds": {"L2": 20, "L3": 10, "L4": 40}}
+        with self.assertRaisesRegex(ValidationError, "level_thresholds.L3"):
+            validate_risk_calibration(bad)
 
     def test_money_change_triggers_hard_guardrail_and_required_modules(self):
         evidence = RepositoryAnalyzer(ROOT).analyze("调整退款金额保留两位小数的计算方式。", self.project_risk)
@@ -368,6 +376,77 @@ class Phase1Test(unittest.TestCase):
             self.assertIn("request goal is analysis_only", blocked.stdout)
         finally:
             shutil.rmtree(temp)
+
+    def test_risk_scenario_cli_validates_default_calibration(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            shutil.copytree(ROOT / ".ai-governance", temp / ".ai-governance", ignore=shutil.ignore_patterns("runs", "risk-scenario-report.*"))
+            shutil.copytree(ROOT / "lib", temp / "lib")
+            shutil.copytree(ROOT / "bin", temp / "bin")
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(temp / "lib")
+            result = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--validate-risk-scenarios"],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("Status: pass", result.stdout)
+            self.assertTrue((temp / ".ai-governance/risk-scenario-report.yaml").exists())
+            report = load_yaml(temp / ".ai-governance/risk-scenario-report.yaml")
+            self.assertEqual("pass", report["status"])
+            self.assertGreaterEqual(report["summary"]["passed"], 4)
+        finally:
+            shutil.rmtree(temp)
+
+    def test_user_context_can_remove_weak_risk_signal_but_not_strong_evidence(self):
+        weak_evidence = {
+            "version": 1,
+            "request": {"original": "修改菜单文案", "request_goal": {"requires_code_change": True}},
+            "repository": {"branch": "unknown", "commit": "unknown"},
+            "code_findings": {
+                "direct_files": [{"path": "app/api/auth.py", "reason": "WEAK SIGNAL: generic API file"}],
+                "related_files": [],
+                "affected_modules": ["app"],
+                "affected_domains": [],
+                "change_types": ["public_api"],
+                "operations": [],
+                "domain_evidence": [],
+                "change_type_evidence": [{
+                    "value": "public_api",
+                    "source": "code_search",
+                    "path": "app/api/auth.py",
+                    "keyword": "api",
+                    "strength": "weak",
+                    "fact": "WEAK SIGNAL: generic api keyword",
+                }],
+                "operation_evidence": [],
+                "database_changes": False,
+                "message_schema_changes": False,
+                "public_api_changes": True,
+                "file_risk": {"highest_score": 1, "effective_score": 1},
+            },
+            "test_findings": {"coverage_confidence": "low"},
+            "unknowns": [],
+            "evidence_sources": ["code_search"],
+        }
+        context = {"scope": {"excluded": ["public API changes"]}, "corrections": []}
+        adjusted = apply_user_context(weak_evidence, context)
+        risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(adjusted)
+        self.assertNotIn("public_api", adjusted["code_findings"]["change_types"])
+        self.assertFalse(adjusted["code_findings"]["public_api_changes"])
+        self.assertNotIn("public-interface-change", risk["triggered_guardrails"])
+        self.assertTrue(adjusted["context_adjustments"]["applied"])
+
+        strong_evidence = dict(weak_evidence)
+        strong_evidence["code_findings"] = dict(weak_evidence["code_findings"])
+        strong_evidence["code_findings"]["change_type_evidence"] = [dict(weak_evidence["code_findings"]["change_type_evidence"][0], strength="strong")]
+        strong_adjusted = apply_user_context(strong_evidence, context)
+        self.assertIn("public_api", strong_adjusted["code_findings"]["change_types"])
+        self.assertTrue(strong_adjusted["context_adjustments"]["conflicts"])
 
     def test_destructive_database_operation_cannot_drop_hard_gate(self):
         evidence = RepositoryAnalyzer(ROOT).analyze("删除重复的设备端口状态数据。", self.project_risk)

@@ -47,7 +47,7 @@ The remaining gaps are mostly depth and integration gaps, not missing core gates
 
 ### Phase 1: Static Configuration
 
-Status: implemented.
+Status: complete for MVP.
 
 Implemented files:
 
@@ -105,12 +105,15 @@ Implemented by:
 - structured dimension explanations in `risk_explanation.dimension_explanations`
 - structured hard guardrail evaluations in `risk_explanation.guardrail_evaluations`
 - `risk-assessment.md` and `post-risk-assessment.md`
+- configurable `risk-calibration.yaml`
+- scenario regression validation through `risk-scenarios.yaml` and `--validate-risk-scenarios`
+- user context corrections applied during reassessment without overriding strong evidence
 - request goal handling for analysis-only and decision-support requests
 
 Remaining gaps:
 
-- Weights are fixed and not calibrated from historical outcomes.
-- Some semantic distinctions still depend on host-model intent input.
+- Default weights and thresholds are configurable, but shipped values are still MVP defaults rather than learned from historical incidents.
+- Some semantic distinctions still depend on host-model intent input or explicit user context.
 
 ### Phase 4: Workflow Generation
 

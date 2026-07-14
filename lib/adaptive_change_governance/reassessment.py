@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .config_loader import dump_yaml, load_yaml
+from .context_adjuster import apply_user_context
 from .repository_analyzer import RepositoryAnalyzer
 from .risk_evaluator import LEVEL_ORDER, RiskEvaluator, render_risk_markdown
 from .workflow_composer import WorkflowComposer
@@ -17,6 +18,7 @@ class ReassessmentRunner:
     project_risk: dict[str, Any]
     guardrails: dict[str, Any]
     workflow_modules: dict[str, Any]
+    calibration: dict[str, Any] | None = None
 
     def run(self, run_dir: Path) -> dict[str, Any]:
         initial_evidence = load_yaml(run_dir / "evidence-pack.yaml")
@@ -25,7 +27,9 @@ class ReassessmentRunner:
         request = initial_evidence.get("request", {}).get("original", "")
         intent = initial_evidence.get("request", {}).get("model_intent", {})
         post_evidence = RepositoryAnalyzer(self.root).analyze(request, self.project_risk, intent=intent)
-        post_risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(post_evidence)
+        context = load_yaml(run_dir / "run-context.yaml") if (run_dir / "run-context.yaml").exists() else {}
+        post_evidence = apply_user_context(post_evidence, context)
+        post_risk = RiskEvaluator(self.project_risk, self.guardrails, self.calibration).evaluate(post_evidence)
         post_workflow = WorkflowComposer(self.project_risk, self.workflow_modules).compose(post_evidence, post_risk)
         comparison = self._compare(initial_evidence, initial_risk, initial_workflow, post_evidence, post_risk, post_workflow)
         comparison["run_id"] = run_dir.name

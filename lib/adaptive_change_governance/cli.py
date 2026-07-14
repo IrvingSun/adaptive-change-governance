@@ -18,9 +18,10 @@ from .progress import ProgressTracker
 from .reassessment import ReassessmentRunner
 from .repository_analyzer import RepositoryAnalyzer
 from .risk_evaluator import RiskEvaluator, render_risk_markdown
+from .risk_scenarios import RiskScenarioValidator
 from .run_status import RunStatusRenderer
 from .run_retention import cleanup_runs, render_cleanup_summary
-from .schema_validator import ValidationError, validate_all
+from .schema_validator import ValidationError, validate_all, validate_risk_calibration
 from .technical_plan import TechnicalPlanError, TechnicalPlanGate
 from .verification_report import VerificationReportGenerator
 from .workflow_composer import WorkflowComposer
@@ -34,6 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--guardrails", default=".ai-governance/guardrails.yaml")
     parser.add_argument("--workflow-modules", default=".ai-governance/workflow-modules.yaml")
     parser.add_argument("--artifact-schemas", default=".ai-governance/artifact-schemas.yaml")
+    parser.add_argument("--risk-calibration", default=".ai-governance/risk-calibration.yaml")
+    parser.add_argument("--risk-scenarios", default=".ai-governance/risk-scenarios.yaml")
     parser.add_argument("--profile", help="Use .ai-governance/profiles/<profile>/ overrides for project risk and guardrails")
     parser.add_argument("--intent-file", help="YAML file produced by the host model with structured change intent")
     parser.add_argument("--output", default=".ai-governance/runs")
@@ -56,6 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--start-step", help="Mark one workflow module as in progress for an existing run id or run directory")
     parser.add_argument("--complete-step", help="Mark one workflow module as completed for an existing run id or run directory")
     parser.add_argument("--validate-artifact", help="Validate one module artifact for an existing run id or run directory")
+    parser.add_argument("--validate-risk-scenarios", action="store_true", help="Validate configured risk scoring scenarios")
     parser.add_argument("--check-gate", help="Check whether a run may enter a stage")
     parser.add_argument("--add-context", help="Add facts, corrections, or scope context to a run id or run directory")
     parser.add_argument("--cleanup-runs", action="store_true", help="Clean old .ai-governance/runs entries according to audit_retention policy")
@@ -98,7 +102,10 @@ def main(argv: list[str] | None = None) -> int:
         guardrails = load_yaml(_config_path(root, tool_root, args.guardrails))
         workflow_modules = load_yaml(_config_path(root, tool_root, args.workflow_modules))
         artifact_schemas = _load_optional_yaml(_config_path(root, tool_root, args.artifact_schemas))
+        risk_calibration = _load_optional_yaml(_config_path(root, tool_root, args.risk_calibration))
         validate_all(project_risk, guardrails, workflow_modules)
+        if risk_calibration:
+            validate_risk_calibration(risk_calibration)
     except (ConfigError, ValidationError) as exc:
         print(f"ERROR: {exc}")
         return 2
@@ -110,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         return _status(root, Path(args.output), args.status, workflow_modules)
 
     if args.next:
-        return _next(root, Path(args.output), args.next, args, project_risk, guardrails, workflow_modules)
+        return _next(root, Path(args.output), args.next, args, project_risk, guardrails, workflow_modules, risk_calibration)
 
     if args.review_decision:
         return _review_decision(root, Path(args.output), args.review_decision, args, workflow_modules)
@@ -137,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         return _verify_diff(root, Path(args.output), args.verify_diff)
 
     if args.reassess:
-        return _reassess(root, Path(args.output), args.reassess, project_risk, guardrails, workflow_modules)
+        return _reassess(root, Path(args.output), args.reassess, project_risk, guardrails, workflow_modules, risk_calibration)
 
     if args.generate_verification_report:
         return _generate_verification_report(root, Path(args.output), args.generate_verification_report)
@@ -157,6 +164,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.validate_artifact:
         return _validate_artifact(root, Path(args.output), args.validate_artifact, args, artifact_schemas)
 
+    if args.validate_risk_scenarios:
+        return _validate_risk_scenarios(root, tool_root, args, project_risk, guardrails, risk_calibration)
+
     if args.check_gate:
         return _check_gate(root, Path(args.output), args.check_gate, args, workflow_modules)
 
@@ -164,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
         return _cleanup_runs(root, Path(args.output), project_risk, args.cleanup_dry_run)
 
     if args.mode == "reassess" and args.run_id:
-        return _reassess(root, Path(args.output), args.run_id, project_risk, guardrails, workflow_modules)
+        return _reassess(root, Path(args.output), args.run_id, project_risk, guardrails, workflow_modules, risk_calibration)
 
     if args.mode != "assess":
         return _guarded_mode(args.mode)
@@ -186,7 +196,7 @@ def main(argv: list[str] | None = None) -> int:
         dump_yaml(run_dir / "change-intent.yaml", intent)
 
     evidence = RepositoryAnalyzer(root).analyze(request, project_risk, intent=intent)
-    risk = RiskEvaluator(project_risk, guardrails).evaluate(evidence)
+    risk = RiskEvaluator(project_risk, guardrails, risk_calibration).evaluate(evidence)
     composer = WorkflowComposer(project_risk, workflow_modules)
     workflow = composer.compose(evidence, risk)
 
@@ -232,7 +242,7 @@ def _status(root: Path, output_root: Path, run_id: str, workflow_modules: dict) 
     return 0
 
 
-def _next(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, project_risk: dict, guardrails: dict, workflow_modules: dict) -> int:
+def _next(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, project_risk: dict, guardrails: dict, workflow_modules: dict, risk_calibration: dict | None = None) -> int:
     run_dir = _resolve_run_dir(root, output_root, run_id)
     if not run_dir.exists():
         print(f"ERROR: run not found: {run_id}")
@@ -256,7 +266,7 @@ def _next(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, 
     if action == "propose_technical_plan":
         return _propose_technical_plan(root, output_root, run_id, workflow_modules)
     if action == "reassess":
-        return _reassess(root, output_root, run_id, project_risk, guardrails, workflow_modules)
+        return _reassess(root, output_root, run_id, project_risk, guardrails, workflow_modules, risk_calibration)
     if action == "generate_verification_report":
         return _generate_verification_report(root, output_root, run_id)
     print("BLOCKED: unsupported automatic next action")
@@ -433,13 +443,31 @@ def _verify_diff(root: Path, output_root: Path, run_id: str) -> int:
     return 0 if report.get("status") == "pass" else 3
 
 
-def _reassess(root: Path, output_root: Path, run_id: str, project_risk: dict, guardrails: dict, workflow_modules: dict) -> int:
+def _validate_risk_scenarios(root: Path, tool_root: Path, args: argparse.Namespace, project_risk: dict, guardrails: dict, risk_calibration: dict) -> int:
+    scenarios_path = _config_path(root, tool_root, args.risk_scenarios)
+    try:
+        report = RiskScenarioValidator(root, project_risk, guardrails, risk_calibration).validate(scenarios_path, root / ".ai-governance")
+    except ConfigError as exc:
+        print(f"ERROR: {exc}")
+        return 2
+    print(f"Risk scenario report: {root / '.ai-governance/risk-scenario-report.yaml'}")
+    print(f"Status: {report.get('status')}")
+    summary = report.get("summary", {})
+    print(f"Passed: {summary.get('passed')}/{summary.get('total')}")
+    for item in report.get("results", []):
+        print(f"- {item.get('id')}: {item.get('status')} expected={item.get('expected_level')} actual={item.get('actual_level')}")
+        for error in item.get("errors", []):
+            print(f"  {error}")
+    return 0 if report.get("status") == "pass" else 3
+
+
+def _reassess(root: Path, output_root: Path, run_id: str, project_risk: dict, guardrails: dict, workflow_modules: dict, risk_calibration: dict | None = None) -> int:
     run_dir = _resolve_run_dir(root, output_root, run_id)
     if not run_dir.exists():
         print(f"ERROR: run not found: {run_id}")
         return 2
     try:
-        report = ReassessmentRunner(root, project_risk, guardrails, workflow_modules).run(run_dir)
+        report = ReassessmentRunner(root, project_risk, guardrails, workflow_modules, risk_calibration).run(run_dir)
     except (ConfigError, FileNotFoundError, KeyError) as exc:
         print(f"ERROR: {exc}")
         return 2

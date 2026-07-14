@@ -17,15 +17,22 @@ bin/change-assess "<需求描述>" --profile charging-platform
 1. 读取 `.ai-governance/project-risk.yaml`。
 2. 读取 `.ai-governance/guardrails.yaml`。
 3. 读取 `.ai-governance/workflow-modules.yaml`。
-4. 校验配置结构。
-5. 检查 Git branch、commit、status、diff；不可用时写入 `UNKNOWN`。
-6. 分析用户诉求并扫描当前版本代码。
-7. 生成 `evidence-pack.yaml`。
-8. 应用硬风险围栏。
-9. 生成 `risk-assessment.yaml`。
-10. 生成 `workflow-plan.md`。
-11. 生成 `review.md` 和 `human-review.yaml`。
-12. 停止，等待 `workflow_plan_approval`。
+4. 读取 `.ai-governance/risk-calibration.yaml`。
+5. 校验配置结构。
+6. 检查 Git branch、commit、status、diff；不可用时写入 `UNKNOWN`。
+7. 分析用户诉求并扫描当前版本代码。
+8. 生成 `evidence-pack.yaml`。
+9. 应用硬风险围栏。
+10. 生成 `risk-assessment.yaml` 和 `risk-assessment.md`。
+11. 生成 `workflow-plan.md`。
+12. 生成 `review.md` 和 `human-review.yaml`。
+13. 停止，等待 `workflow_plan_approval`。
+
+风险校准回归：
+
+```bash
+bin/change-assess --validate-risk-scenarios
+```
 
 人工审阅：
 
