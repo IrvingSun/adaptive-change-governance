@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .config_loader import dump_yaml, load_yaml
+from .next_action import NextActionPlanner
 from .progress import ProgressTracker
 from .workflow_composer import LEVEL_MODULES, WorkflowComposer
 
@@ -24,7 +25,10 @@ class HumanReviewGate:
     def write_review_files(self, run_dir: Path, evidence: dict[str, Any], risk: dict[str, Any], workflow: dict[str, Any]) -> None:
         review = self._default_review(evidence, risk, workflow)
         dump_yaml(run_dir / "human-review.yaml", review)
-        (run_dir / "review.md").write_text(self._render_review_markdown(evidence, risk, workflow, review), encoding="utf-8")
+        planner = NextActionPlanner()
+        operator_summary = planner.render_operator_summary(planner.operator_summary(run_dir))
+        body = self._render_review_markdown(evidence, risk, workflow, review)
+        (run_dir / "review.md").write_text(operator_summary + "\n" + body, encoding="utf-8")
 
     def approve_workflow(self, run_dir: Path, project_risk: dict[str, Any]) -> dict[str, Any]:
         evidence = load_yaml(run_dir / "evidence-pack.yaml")

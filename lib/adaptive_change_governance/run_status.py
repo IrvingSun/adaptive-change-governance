@@ -56,6 +56,10 @@ class RunStatusRenderer:
         next_action = planner.plan(run_dir)
         blockers = next_action.get("blockers", [])
         lines = [
+            planner.render_operator_summary(planner.operator_summary(run_dir, plan=next_action)).rstrip(),
+            "",
+            "---",
+            "",
             "Run Status",
             "",
             f"Run: {run_dir.name}",

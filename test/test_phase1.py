@@ -336,8 +336,8 @@ class Phase1Test(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(next_action.returncode, 0, next_action.stderr + next_action.stdout)
-            self.assertIn("Requires user confirmation: no", next_action.stdout)
-            self.assertIn("Recommended action: generate_analysis_report", next_action.stdout)
+            self.assertIn("Requires human confirmation: no", next_action.stdout)
+            self.assertIn("Next action: generate_analysis_report", next_action.stdout)
             next_execute = subprocess.run(
                 [sys.executable, str(temp / "bin/change-assess"), "--next", run_dir.name, "--execute-next"],
                 cwd=temp,
@@ -674,6 +674,22 @@ class Phase1Test(unittest.TestCase):
             self.assertIn("Current gate: workflow_plan_approval", status.stdout)
             self.assertIn("workflow not approved", status.stdout)
             self.assertIn("change-assess --approve-workflow", status.stdout)
+            # Operator Summary console view leads --status (change 3)
+            self.assertIn("# Operator Summary", status.stdout)
+            self.assertIn("Current stage:", status.stdout)
+            self.assertIn("Risk:", status.stdout)
+            # Operator Summary block leads review.md (change 1)
+            review_md = (runs[0] / "review.md").read_text(encoding="utf-8")
+            self.assertTrue(review_md.startswith("# Operator Summary"), review_md[:80])
+            self.assertIn("Recommended action:", review_md)
+            self.assertIn("Blocked by:", review_md)
+            self.assertIn("Audit files:", review_md)
+            # Workflow Summary block leads workflow-plan.md (change 2)
+            plan_md = (runs[0] / "workflow-plan.md").read_text(encoding="utf-8")
+            self.assertTrue(plan_md.startswith("# Workflow Summary"), plan_md[:80])
+            self.assertIn("Risk level:", plan_md)
+            self.assertIn("Required modules:", plan_md)
+            self.assertIn("Next gate:", plan_md)
             next_action = subprocess.run(
                 [sys.executable, str(temp / "bin/change-assess"), "--next", runs[0].name],
                 cwd=temp,
@@ -683,9 +699,9 @@ class Phase1Test(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(next_action.returncode, 0, next_action.stderr + next_action.stdout)
-            self.assertIn("Next Action", next_action.stdout)
-            self.assertIn("Requires user confirmation: yes", next_action.stdout)
-            self.assertIn("Recommended action: approve_workflow", next_action.stdout)
+            self.assertIn("Next action: approve_workflow", next_action.stdout)
+            self.assertIn("Requires human confirmation: yes", next_action.stdout)
+            self.assertIn("Reason: Workflow approval is required", next_action.stdout)
             execute_next = subprocess.run(
                 [sys.executable, str(temp / "bin/change-assess"), "--next", runs[0].name, "--execute-next"],
                 cwd=temp,
@@ -787,7 +803,7 @@ class Phase1Test(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(next_action.returncode, 0, next_action.stderr + next_action.stdout)
-            self.assertIn("Recommended action: answer_investigation_question", next_action.stdout)
+            self.assertIn("Next action: answer_investigation_question", next_action.stdout)
             self.assertIn("Investigation questions:", next_action.stdout)
         finally:
             shutil.rmtree(temp)

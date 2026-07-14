@@ -50,6 +50,15 @@ class WorkflowComposer:
     def render_markdown(self, evidence: dict[str, Any], risk: dict[str, Any], workflow: dict[str, Any]) -> str:
         rec = workflow["workflow_recommendation"]
         lines = [
+            "# Workflow Summary",
+            "",
+            f"Risk level: {rec['final_level']}",
+            f"Required modules: {', '.join(rec.get('required_modules', [])) or 'none'}",
+            f"Skipped modules: {len(rec.get('skipped_modules', []))} (see section 7 below)",
+            f"Next gate: {rec.get('default_stop_gate', 'workflow_plan_approval')}",
+            "",
+            "---",
+            "",
             "# Workflow Plan",
             "",
             "## 1. 任务摘要",

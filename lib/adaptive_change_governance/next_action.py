@@ -7,6 +7,25 @@ from typing import Any
 from .config_loader import ConfigError, load_yaml
 
 
+# Human-readable reason for each recommended action. Presentation only: this
+# never changes what --execute-next may run, nor any approval/gate semantics.
+ACTION_PHRASES = {
+    "approve_workflow": "Workflow approval is required before technical planning.",
+    "approve_technical_plan": "Technical-plan approval is required before implementation.",
+    "generate_analysis_report": "Request goal is analysis-only; generate the analysis report.",
+    "generate_agent_tasks": "L3/L4 workflow: generate agent tasks to split the work.",
+    "propose_technical_plan": "Workflow is approved; propose the technical plan.",
+    "answer_investigation_question": "Open investigation questions must be answered before technical planning.",
+    "reassess": "Implementation is done; run reassessment before verification.",
+    "review_reassessment": "Reassessment requests human re-approval.",
+    "generate_verification_report": "Generate the final verification report.",
+    "implementation_gate_ready": "Check the implementation gate before editing business code.",
+    "resolve_blockers": "Resolve the blockers below before continuing.",
+    "complete": "This run is complete.",
+    "none": "No further action is available.",
+}
+
+
 @dataclass
 class NextActionPlanner:
     def plan(self, run_dir: Path) -> dict[str, Any]:
@@ -139,22 +158,87 @@ class NextActionPlanner:
             questions.append(item)
         return questions
 
-    def render(self, plan: dict[str, Any]) -> str:
+    def operator_summary(self, run_dir: Path, plan: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Presentation-layer summary for a run, built entirely from plan() and
+        existing artifacts. It surfaces state and a recommended next step; it does
+        not approve, execute, or change any gate/risk/approval semantics.
+
+        `plan` may be passed in by a caller that already computed it (e.g.
+        --status) to avoid recomputing; when omitted it is computed here, so the
+        default `operator_summary(run_dir)` usage is unchanged."""
+        if plan is None:
+            plan = self.plan(run_dir)
+        risk = self._load_if_exists(run_dir / "risk-assessment.yaml")
+        workflow = self._load_if_exists(run_dir / "workflow-recommendation.yaml")
+        rec = workflow.get("workflow_recommendation", {})
+        action = plan.get("recommended_action", "none")
+        return {
+            "run_id": run_dir.name,
+            "current_stage": plan.get("current_gate"),
+            "risk_level": risk.get("final_level", rec.get("final_level", "unknown")),
+            "request_goal": (plan.get("request_goal") or {}).get("type", "implementation"),
+            "why": self._risk_why(risk, rec),
+            "recommended_action": action,
+            "recommended_action_reason": ACTION_PHRASES.get(action, ""),
+            "requires_user_confirmation": bool(plan.get("requires_user_confirmation")),
+            "blocked_by": list(plan.get("blockers", [])),
+            "command": plan.get("command", ""),
+            "audit_location": f".ai-governance/runs/{run_dir.name}/",
+        }
+
+    def render_operator_summary(self, summary: dict[str, Any]) -> str:
         lines = [
-            "Next Action",
+            "# Operator Summary",
             "",
-            f"Run: {plan.get('run_id')}",
-            f"Current gate: {plan.get('current_gate')}",
-            f"Requires user confirmation: {'yes' if plan.get('requires_user_confirmation') else 'no'}",
-            f"Recommended action: {plan.get('recommended_action')}",
-            f"Can execute automatically: {'yes' if plan.get('can_execute') else 'no'}",
+            f"Current stage: {summary.get('current_stage')}",
+            f"Risk: {summary.get('risk_level')}",
+            f"Request goal: {summary.get('request_goal')}",
+            "",
+            "Why:",
+        ]
+        lines.extend(f"  - {item}" for item in summary.get("why") or ["unknown"])
+        lines.extend([
+            "",
+            f"Recommended action: {summary.get('recommended_action_reason') or summary.get('recommended_action')}",
+            f"Requires human confirmation: {'yes' if summary.get('requires_user_confirmation') else 'no'}",
+            "",
+            "Blocked by:",
+        ])
+        lines.extend(f"  - {item}" for item in summary.get("blocked_by") or ["none"])
+        lines.extend([
             "",
             "Command:",
-            f"  {plan.get('command') or 'none'}",
+            f"  {summary.get('command') or 'none'}",
             "",
-            "Blockers:",
+            f"Audit files: {summary.get('audit_location') or 'none'}",
+        ])
+        return "\n".join(lines) + "\n"
+
+    def _risk_why(self, risk: dict[str, Any], rec: dict[str, Any]) -> list[str]:
+        triggered = rec.get("triggered_guardrails") or risk.get("triggered_guardrails") or []
+        if triggered:
+            return [f"{name} guardrail triggered" for name in triggered]
+        weak = [item.get("id") for item in risk.get("weak_guardrail_candidates", []) if item.get("id")]
+        if weak:
+            return [
+                "No hard guardrails triggered by current evidence.",
+                f"Weak signals need confirmation: {', '.join(str(item) for item in weak)}",
+            ]
+        return ["No hard guardrails (database/API/permission/security/financial) triggered by current evidence."]
+
+    def render(self, plan: dict[str, Any]) -> str:
+        action = plan.get("recommended_action", "none")
+        lines = [
+            f"Next action: {action}",
+            f"Requires human confirmation: {'yes' if plan.get('requires_user_confirmation') else 'no'}",
+            f"Reason: {ACTION_PHRASES.get(action, 'See run status for details.')}",
+            "Command:",
+            f"  {plan.get('command') or 'none'}",
         ]
-        lines.extend(f"  - {item}" for item in plan.get("blockers", []) or ["none"])
+        blockers = plan.get("blockers", [])
+        if blockers:
+            lines.extend(["", "Blocked by:"])
+            lines.extend(f"  - {item}" for item in blockers)
         questions = plan.get("investigation_questions", [])
         if questions:
             lines.extend(["", "Investigation questions:"])
