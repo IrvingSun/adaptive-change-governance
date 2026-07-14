@@ -11,6 +11,22 @@ Run from the target repository root:
 change-assess "<user request>" --mode assess --intent-file <intent-file>
 ```
 
+## MUST — gate discipline (you are the enforcement)
+
+On some hosts a `PreToolUse` hook blocks edits until the implementation gate
+passes. On hosts without that hook (for example the Codex CLI), **no process
+stops you — this skill is the only gate, so you MUST self-enforce it**:
+
+- You MUST NOT generate a technical plan before workflow approval exists.
+- You MUST NOT modify business code before technical-plan approval AND a passing
+  `change-assess --check-gate <run_id> --stage implementation` (`GATE OK`).
+- You MUST NOT write approval or gate-state files by hand
+  (`.workflow-approved`, `.technical-plan-approved`, `human-review.yaml`,
+  `approved-*.yaml`, verification reports). Only the `change-assess` CLI writes
+  them; editing them directly forges an approval.
+- If you cannot run `change-assess`, STOP and report the blocker. Do not proceed
+  to implementation on an unverified gate.
+
 Required behavior:
 
 - Treat user input as request, not code fact.
@@ -29,8 +45,8 @@ Required behavior:
 - After implementation, run `change-assess --reassess <run_id>` and `change-assess --generate-verification-report <run_id>` before final handoff.
 - Stop after `workflow-plan.md` until human approval is present.
 - For `analysis_only` or `decision_support`, run `change-assess --generate-analysis-report <run_id>` and stop after presenting the analysis report unless the user opens a new implementation request.
-- Do not generate a technical plan before workflow approval.
-- Do not modify business code before technical-plan approval and implementation gate check.
+- You MUST NOT generate a technical plan before workflow approval.
+- You MUST NOT modify business code before technical-plan approval and a passing implementation gate check.
 
 Use command-line review and approval. Do not ask users to manually edit `human-review.yaml`; it is an audit file.
 When showing workflow review, include the Chinese progress status bar so the user can see 未执行 / 执行中 / 已执行 and elapsed time per completed step.

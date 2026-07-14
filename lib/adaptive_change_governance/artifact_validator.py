@@ -12,11 +12,26 @@ class ArtifactValidationError(ValueError):
     pass
 
 
+def _count_lines(path: Path) -> int | None:
+    """Line count of a text file, or None when it cannot be read."""
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore") as handle:
+            return sum(1 for _ in handle)
+    except OSError:
+        return None
+
+
 @dataclass
 class ArtifactValidator:
     schemas: dict[str, Any]
 
-    def validate(self, run_dir: Path, module: str, artifact: str) -> dict[str, Any]:
+    def validate(
+        self,
+        run_dir: Path,
+        module: str,
+        artifact: str,
+        project_root: Path | None = None,
+    ) -> dict[str, Any]:
         schema = self._schema_for(module)
         artifact_path = self._artifact_path(run_dir, artifact)
         errors = []
@@ -30,6 +45,7 @@ class ArtifactValidator:
             else:
                 errors.extend(self._validate_required_fields(data, schema.get("required_fields", [])))
                 errors.extend(self._validate_evidence(data, schema))
+                errors.extend(self._validate_evidence_locations(data, schema, project_root))
         report = {
             "version": 1,
             "run_id": run_dir.name,
@@ -87,7 +103,7 @@ class ArtifactValidator:
         return errors
 
     def _validate_evidence(self, data: dict[str, Any], schema: dict[str, Any]) -> list[str]:
-        errors = []
+        errors: list[str] = []
         if not schema.get("evidence_required") and not schema.get("evidence_path_line_required") and not schema.get("confidence_required"):
             return errors
         evidence = data.get("evidence")
@@ -111,6 +127,53 @@ class ArtifactValidator:
                 errors.append(f"evidence[{index}].fact must start with FACT:, INFERENCE:, UNKNOWN:, WEAK SIGNAL:, or DECISION:")
         return errors
 
+    def _validate_evidence_locations(
+        self, data: dict[str, Any], schema: dict[str, Any], project_root: Path | None
+    ) -> list[str]:
+        """Spot-check that FACT evidence cites a location that actually resolves.
+
+        Confirms a cited file:line exists inside the governed project; it does
+        NOT verify that the location supports the claim (see docs/threat-model.md,
+        O3 fabricated-but-plausible evidence). Fails open: skipped when the check
+        is not requested, the project root is unknown, or a file cannot be read.
+        Only FACT evidence is checked; INFERENCE/UNKNOWN/WEAK SIGNAL/DECISION may
+        reference planned or hypothetical locations.
+        """
+        if not schema.get("evidence_location_must_resolve") or project_root is None:
+            return []
+        evidence = data.get("evidence")
+        if not isinstance(evidence, list):
+            return []
+        try:
+            root = project_root.resolve()
+        except OSError:
+            return []
+        errors: list[str] = []
+        for index, item in enumerate(evidence):
+            if not isinstance(item, dict):
+                continue
+            if not str(item.get("fact", "")).startswith("FACT:"):
+                continue
+            raw_path = item.get("path")
+            line = item.get("line")
+            if raw_path in ("", None) or not isinstance(line, int):
+                continue  # missing/mistyped fields are reported by _validate_evidence
+            target = (root / str(raw_path)).resolve()
+            if not target.is_relative_to(root):
+                errors.append(f"evidence[{index}] path escapes the project: {raw_path}")
+                continue
+            if not target.is_file():
+                errors.append(f"evidence[{index}] cites a file that does not exist: {raw_path}")
+                continue
+            line_count = _count_lines(target)
+            if line_count is None:
+                continue  # unreadable: cannot verify, do not block
+            if line < 1 or line > line_count:
+                errors.append(
+                    f"evidence[{index}] cites {raw_path}:{line} but the file has {line_count} lines"
+                )
+        return errors
+
     def _schema_rules(self, schema: dict[str, Any]) -> dict[str, Any]:
         if not schema:
             return {}
@@ -118,6 +181,7 @@ class ArtifactValidator:
             "evidence_required": bool(schema.get("evidence_required")),
             "evidence_path_line_required": bool(schema.get("evidence_path_line_required")),
             "confidence_required": bool(schema.get("confidence_required")),
+            "evidence_location_must_resolve": bool(schema.get("evidence_location_must_resolve")),
         }
 
     def _write_report(self, run_dir: Path, report: dict[str, Any]) -> None:

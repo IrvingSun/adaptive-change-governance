@@ -15,5 +15,6 @@ for name in assessment-schema workflow-modules artifact-schemas project-risk gua
 done
 
 rsync -a --delete "$ROOT/.ai-governance/profiles/" "$PLUGIN/.ai-governance/profiles/"
+rsync -a --delete "$ROOT/.ai-governance/templates/" "$PLUGIN/.ai-governance/templates/"
 
 echo "plugin runtime synced from root tree"

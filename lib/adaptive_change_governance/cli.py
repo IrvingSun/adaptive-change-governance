@@ -558,7 +558,7 @@ def _complete_step(root: Path, output_root: Path, run_id: str, args: argparse.Na
         return 2
     if args.artifact:
         for artifact in args.artifact:
-            report = ArtifactValidator(artifact_schemas).validate(run_dir, args.module, artifact)
+            report = ArtifactValidator(artifact_schemas).validate(run_dir, args.module, artifact, project_root=root)
             if report.get("status") != "pass":
                 ProgressTracker(workflow_modules).mark_blocked(
                     run_dir,
@@ -599,7 +599,7 @@ def _validate_artifact(root: Path, output_root: Path, run_id: str, args: argpars
         print("ERROR: --artifact is required")
         return 2
     try:
-        reports = [ArtifactValidator(artifact_schemas).validate(run_dir, args.module, artifact) for artifact in args.artifact]
+        reports = [ArtifactValidator(artifact_schemas).validate(run_dir, args.module, artifact, project_root=root) for artifact in args.artifact]
     except ArtifactValidationError as exc:
         print(f"ERROR: {exc}")
         return 2

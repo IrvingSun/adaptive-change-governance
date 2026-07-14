@@ -146,9 +146,9 @@ class InvestigationQuestionComposer:
                 by_key[key] = item
                 continue
             existing["evidence"] = _unique(existing.get("evidence", []) + item.get("evidence", []))[:10]
-            if order.get(item.get("priority"), 0) > order.get(existing.get("priority"), 0):
+            if order.get(item.get("priority", ""), 0) > order.get(existing.get("priority", ""), 0):
                 existing["priority"] = item["priority"]
-        return sorted(by_key.values(), key=lambda item: (-order.get(item.get("priority"), 0), item["id"]))
+        return sorted(by_key.values(), key=lambda item: (-order.get(item.get("priority", ""), 0), item["id"]))
 
 
 def _unique(values: list[str]) -> list[str]:

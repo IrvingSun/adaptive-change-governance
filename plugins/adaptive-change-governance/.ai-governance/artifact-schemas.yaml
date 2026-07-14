@@ -12,6 +12,7 @@ schemas:
     evidence_required: true
     evidence_path_line_required: true
     confidence_required: true
+    evidence_location_must_resolve: true
   data_impact_analysis:
     description: Data impact analysis must identify operations, estimates, dry-run, rollback, and evidence.
     required_fields:
@@ -23,6 +24,7 @@ schemas:
     evidence_required: true
     evidence_path_line_required: true
     confidence_required: true
+    evidence_location_must_resolve: true
   adversarial_review:
     description: Adversarial review must challenge assumptions and surface failure modes.
     required_fields:

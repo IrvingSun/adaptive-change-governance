@@ -225,23 +225,39 @@ assess
 ├── guardrails.yaml
 ├── workflow-modules.yaml
 ├── assessment-schema.yaml
-├── incident-patterns.md
-├── commands/
-│   └── change-assess.md
+├── artifact-schemas.yaml
+├── risk-calibration.yaml
+├── risk-scenarios.yaml
+├── profiles/
+│   └── charging-platform/
+│       ├── project-risk.yaml
+│       └── guardrails.yaml
 ├── templates/
 │   ├── evidence-pack.md
 │   ├── workflow-plan.md
 │   ├── technical-plan.md
-│   └── verification-report.md
+│   ├── verification-report.md
+│   └── human-review.md
 └── runs/
-    └── <timestamp>-<slug>/
+    └── <timestamp>-<slug>/          # 每次评估一个隔离 run，默认 gitignored
         ├── request.md
         ├── evidence-pack.yaml
-        ├── risk-assessment.yaml
+        ├── risk-assessment.yaml / .md
+        ├── investigation-questions.yaml / .md
+        ├── workflow-recommendation.yaml
         ├── workflow-plan.md
-        ├── technical-plan.md
-        ├── implementation-log.md
-        └── verification-report.md
+        ├── review.md
+        ├── human-review.yaml
+        ├── progress.yaml
+        ├── run-state.yaml
+        ├── analysis-report.yaml / .md          # analysis_only / decision_support
+        ├── approved-workflow.yaml / -plan.md    # 工作流批准后
+        ├── agent-tasks.yaml / .md               # L3/L4 拆分子任务
+        ├── technical-plan.yaml / .md
+        ├── approved-technical-plan.yaml / .md   # 技术方案批准后
+        ├── diff-verification.yaml / .md         # 实现后
+        ├── reassessment.yaml / .md              # 复评
+        └── verification-report.yaml / .md       # 最终验证
 ```
 
 ---
@@ -906,15 +922,18 @@ reassessment:
 
 ---
 
-# 17. Codex CLI 命令行为
+# 17. Codex / Claude 命令行为
 
-文件：
+两个宿主共用同一套 `change-assess` CLI 运行时，入口不同：
 
 ```text
-.ai-governance/commands/change-assess.md
+Claude Code：commands/change-assess.md（slash 命令）+ skills/change-governance/SKILL.md
+Codex CLI：  skills/change-governance/SKILL.md
 ```
 
-命令逻辑：
+Codex 插件模型只声明 `skills`、不声明 command，因此 Codex 端的门禁纪律由 skill 自我强制（无 PreToolUse hook）。
+
+命令逻辑（两端一致）：
 
 ```text
 阶段一：解析参数

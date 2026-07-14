@@ -1,11 +1,14 @@
 {
   "name": "adaptive-governance",
+  "version": "0.3.1",
   "interface": {
     "displayName": "Adaptive Governance"
   },
   "plugins": [
     {
       "name": "adaptive-change-governance",
+      "version": "0.3.1",
+      "description": "Assess change risk and route workflow gates before AI coding implementation.",
       "source": {
         "source": "local",
         "path": "./plugins/adaptive-change-governance"
@@ -14,7 +17,13 @@
         "installation": "AVAILABLE",
         "authentication": "ON_INSTALL"
       },
-      "category": "Productivity"
+      "category": "Productivity",
+      "tags": [
+        "governance",
+        "risk",
+        "guardrails",
+        "workflow"
+      ]
     }
   ]
 }

@@ -1,16 +1,19 @@
 {
   "name": "adaptive-change-governance",
   "version": "0.3.1",
-  "description": "Reusable change governance and workflow routing for AI coding agents.",
+  "description": "Assess change risk, compose workflow gates, and collect human approval before technical planning or implementation.",
   "author": {
     "name": "Adaptive Change Governance Maintainers"
   },
   "license": "MIT",
+  "homepage": "https://github.com/IrvingSun/adaptive-change-governance",
+  "repository": "https://github.com/IrvingSun/adaptive-change-governance.git",
   "keywords": [
     "governance",
     "risk",
     "workflow",
-    "codex"
+    "guardrails",
+    "approval"
   ],
   "skills": "./skills/",
   "interface": {

@@ -68,15 +68,21 @@ def main() -> int:
     if _is_relative_to(target, project / ".ai-governance"):
         return 0
 
-    run_dir = _latest_active_implementation_run(runs_root)
-    if run_dir is None:
+    blocking = _blocking_runs(runs_root)
+    if not blocking:
         return 0
-    errors = _gate_errors(run_dir)
-    if not errors:
-        return 0
+    # Enforce every pending run, not only the newest: a newer approved run must
+    # not mask an older run whose gate is still unmet. Report the most recent
+    # offender so the message is stable.
+    run_dir, errors = blocking[0]
+    extra = (
+        f" ({len(blocking)} governed runs are pending; showing the most recent)"
+        if len(blocking) > 1
+        else ""
+    )
     reason = (
         f"Adaptive Change Governance: run '{run_dir.name}' has not passed the implementation gate "
-        f"({'; '.join(errors)}). Complete the gate first: "
+        f"({'; '.join(errors)}){extra}. Complete the gate first: "
         f"change-assess --next {run_dir.name}. "
         "If this run is obsolete, record it via "
         f"change-assess --review-decision {run_dir.name} --decision reject --comment \"abandoned\". "
@@ -110,8 +116,8 @@ def _protected_run_file_reason(target: Path, runs_root: Path) -> str:
     return ""
 
 
-def _latest_active_implementation_run(runs_root: Path) -> Path | None:
-    candidates = []
+def _active_implementation_runs(runs_root: Path) -> list[Path]:
+    runs: list[Path] = []
     for run_dir in runs_root.iterdir():
         if not run_dir.is_dir():
             continue
@@ -121,12 +127,22 @@ def _latest_active_implementation_run(runs_root: Path) -> Path | None:
             continue
         if _goal_type(run_dir) in UNGOVERNED_GOALS:
             continue
-        if _scan_value(run_dir / "human-review.yaml", "decision") == "reject":
+        if _scalar_at(run_dir / "human-review.yaml", ("decision",)) == "reject":
             continue
-        candidates.append(run_dir)
-    if not candidates:
-        return None
-    return max(candidates, key=lambda path: path.stat().st_mtime)
+        runs.append(run_dir)
+    return runs
+
+
+def _blocking_runs(runs_root: Path) -> list[tuple[Path, list[str]]]:
+    """Every active governed run whose implementation gate is not yet met, most
+    recent first. Empty when nothing blocks."""
+    blocking: list[tuple[Path, list[str]]] = []
+    for run_dir in _active_implementation_runs(runs_root):
+        errors = _gate_errors(run_dir)
+        if errors:
+            blocking.append((run_dir, errors))
+    blocking.sort(key=lambda item: item[0].stat().st_mtime, reverse=True)
+    return blocking
 
 
 def _gate_errors(run_dir: Path) -> list[str]:
@@ -138,32 +154,53 @@ def _gate_errors(run_dir: Path) -> list[str]:
     if not (run_dir / "approved-technical-plan.yaml").exists():
         errors.append("approved-technical-plan.yaml is missing")
     diff_path = run_dir / "diff-verification.yaml"
-    if diff_path.exists() and _scan_value(diff_path, "status") != "pass":
+    if diff_path.exists() and _scalar_at(diff_path, ("status",)) != "pass":
         errors.append("diff verification is blocked")
     return errors
 
 
 def _run_state(run_dir: Path) -> str:
-    return _scan_value(run_dir / "run-state.yaml", "state")
+    return _scalar_at(run_dir / "run-state.yaml", ("state",))
 
 
 def _goal_type(run_dir: Path) -> str:
-    return _scan_value(run_dir / "workflow-recommendation.yaml", "type")
+    return _scalar_at(
+        run_dir / "workflow-recommendation.yaml",
+        ("workflow_recommendation", "request_goal", "type"),
+    )
 
 
-def _scan_value(path: Path, key: str) -> str:
-    """Return the first top- or nested-level scalar for `key` in a dump_yaml file."""
+def _scalar_at(path: Path, key_path: tuple[str, ...]) -> str:
+    """Return the scalar at a nested mapping path in a dump_yaml file.
+
+    Indentation-based, so a key is matched only under its expected parent rather
+    than by first-match across nesting (e.g. the top-level `status` in
+    diff-verification.yaml, not the nested `low_risk_intent_check.status`).
+    Stdlib only: the hook must run without PyYAML. List entries (`- ...`) are
+    skipped; every target here is a mapping scalar.
+    """
     if not path.exists():
         return ""
     try:
         text = path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return ""
-    prefix = f"{key}:"
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith(prefix):
-            return stripped[len(prefix):].strip().strip("'\"")
+    stack: list[tuple[int, str]] = []
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#") or stripped.startswith("- "):
+            continue
+        if ":" not in stripped:
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        key, _, value = stripped.partition(":")
+        current = tuple(item[1] for item in stack) + (key.strip(),)
+        stack.append((indent, key.strip()))
+        value = value.strip().strip("'\"")
+        if current == key_path and value:
+            return value
     return ""
 
 

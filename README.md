@@ -2,6 +2,79 @@
 
 Reusable change governance and workflow routing for AI coding agents.
 
+## Quick Start
+
+Adaptive Change Governance is a safety layer for AI coding agents. It assesses a requested change, writes audit artifacts, recommends the right workflow, and blocks implementation until the required gates are approved.
+
+Install the Python dependency used by the CLI:
+
+```bash
+python3 -m pip install PyYAML
+```
+
+Run an assessment from the target repository root:
+
+```bash
+change-assess "把后台「群配置」相关的菜单修改为「业务群配置」"
+```
+
+During local development of this repository, use the checked-in wrapper instead:
+
+```bash
+bin/change-assess "把后台「群配置」相关的菜单修改为「业务群配置」"
+```
+
+The command prints a run id and writes audit files under:
+
+```text
+.ai-governance/runs/<run_id>/
+```
+
+Start with the human-readable files:
+
+```bash
+cat .ai-governance/runs/<run_id>/review.md
+cat .ai-governance/runs/<run_id>/workflow-plan.md
+```
+
+Then let the tool tell you the next step:
+
+```bash
+change-assess --status <run_id>
+change-assess --next <run_id>
+```
+
+For a normal implementation request, the controlled path is:
+
+```bash
+change-assess --approve-workflow <run_id>
+change-assess --propose-technical-plan <run_id>
+change-assess --review-technical-plan <run_id>
+change-assess --approve-technical-plan <run_id>
+change-assess --check-gate <run_id> --stage implementation
+```
+
+Only start editing business code after the implementation gate returns `GATE OK`. After implementation, verify the actual diff and generate the final report:
+
+```bash
+change-assess --verify-diff <run_id>
+change-assess --reassess <run_id>
+change-assess --generate-verification-report <run_id>
+```
+
+For analysis-only or decision-support requests, generate the answer artifact and stop without implementation:
+
+```bash
+change-assess --generate-analysis-report <run_id>
+```
+
+To customize project-specific risk behavior, edit:
+
+- `.ai-governance/project-risk.yaml` for baseline risk, high-risk file patterns, and audit retention.
+- `.ai-governance/guardrails.yaml` for hard guardrails such as money, data deletion, permissions, or public interfaces.
+- `.ai-governance/workflow-modules.yaml` for which workflow steps each risk level requires.
+- `.ai-governance/profiles/<profile>/` for domain-specific overrides.
+
 Phase 1 command:
 
 ```bash
@@ -254,10 +327,16 @@ The root `lib/`, `bin/`, and `.ai-governance/*.yaml` are the single source of tr
 scripts/sync-plugin.sh
 ```
 
-`test/test_phase1.py` fails if the copies drift. CI (`.github/workflows/ci.yml`) runs `mypy` (see `mypy.ini`) and the test suite:
+`test/test_phase1.py` fails if the copies drift. CI (`.github/workflows/ci.yml`) runs `mypy` (see `mypy.ini`) and the test suite. Run the same gates locally before committing:
 
 ```bash
 python3 -m pip install PyYAML mypy types-PyYAML
+scripts/check.sh   # mypy + tests, matching CI
+```
+
+`scripts/check.sh` prefers `.venv/bin/python` when present. To run the steps individually:
+
+```bash
 mypy lib/adaptive_change_governance plugins/adaptive-change-governance/hooks/implementation_gate.py
 python3 test/test_phase1.py
 ```

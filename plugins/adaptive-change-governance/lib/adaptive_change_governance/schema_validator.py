@@ -125,7 +125,7 @@ def validate_artifact_schemas(data: dict[str, Any]) -> None:
         required = schema.get("required_fields", [])
         if not isinstance(required, list):
             raise ValidationError(f"artifact-schemas.yaml.schemas.{module}.required_fields must be a list")
-        for key in ("evidence_required", "evidence_path_line_required", "confidence_required"):
+        for key in ("evidence_required", "evidence_path_line_required", "confidence_required", "evidence_location_must_resolve"):
             if key in schema and not isinstance(schema[key], bool):
                 raise ValidationError(f"artifact-schemas.yaml.schemas.{module}.{key} must be true or false")
 

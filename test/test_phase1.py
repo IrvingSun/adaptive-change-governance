@@ -13,6 +13,7 @@ import sys
 sys.path.insert(0, str(ROOT / "lib"))
 
 from adaptive_change_governance.config_loader import dump_yaml, load_yaml
+from adaptive_change_governance.artifact_validator import ArtifactValidator
 import adaptive_change_governance.cli as cli_module
 from adaptive_change_governance.artifact_context import apply_validated_artifacts
 from adaptive_change_governance.context_adjuster import apply_user_context
@@ -1048,6 +1049,9 @@ class Phase1Test(unittest.TestCase):
             self.assertIn("evidence[0].line is required", vague_validation.stdout)
             self.assertIn("evidence[0].confidence must be high, medium, or low", vague_validation.stdout)
 
+            cited = temp / "app/api/example.py"
+            cited.parent.mkdir(parents=True, exist_ok=True)
+            cited.write_text("".join(f"# line {n}\n" for n in range(1, 15)), encoding="utf-8")
             (run_dir / "dependency-analysis.yaml").write_text(
                 "upstream: []\n"
                 "downstream: []\n"
@@ -1689,7 +1693,15 @@ class PluginSyncTest(unittest.TestCase):
         )
 
     def test_plugin_governance_configs_match_root(self):
-        for name in ("assessment-schema", "workflow-modules", "artifact-schemas", "project-risk", "guardrails"):
+        for name in (
+            "assessment-schema",
+            "workflow-modules",
+            "artifact-schemas",
+            "project-risk",
+            "guardrails",
+            "risk-calibration",
+            "risk-scenarios",
+        ):
             with self.subTest(config=name):
                 self.assertEqual(
                     (ROOT / f".ai-governance/{name}.yaml").read_bytes(),
@@ -1701,6 +1713,22 @@ class PluginSyncTest(unittest.TestCase):
             self._tree(ROOT / ".ai-governance/profiles"),
             self._tree(self.PLUGIN / ".ai-governance/profiles"),
         )
+
+    def test_plugin_templates_match_root(self):
+        self.assertEqual(
+            self._tree(ROOT / ".ai-governance/templates"),
+            self._tree(self.PLUGIN / ".ai-governance/templates"),
+        )
+
+    def test_removed_root_governance_commands_are_not_packaged(self):
+        # The .ai-governance/commands entrypoint was removed (Claude uses
+        # commands/, Codex uses the skill). Guard against it silently returning.
+        for base in (ROOT, self.PLUGIN):
+            with self.subTest(base=base):
+                self.assertFalse(
+                    (base / ".ai-governance/commands").exists(),
+                    f"unexpected .ai-governance/commands under {base}",
+                )
 
 
 class HookGateTest(unittest.TestCase):
@@ -1806,6 +1834,163 @@ class HookGateTest(unittest.TestCase):
             self.assertEqual({}, self._invoke(temp, str(temp / "app/main.py"), mode="off"))
         finally:
             shutil.rmtree(temp)
+
+    # --- Adversarial regression corpus: bypass vectors the hook must not fall for ---
+
+    def test_hook_enforces_older_pending_run_masked_by_newer_approved_run(self):
+        """A newer, fully-approved run must not mask an older run whose gate is
+        still unmet. Selecting only the most-recent run would allow this edit."""
+        temp = Path(tempfile.mkdtemp())
+        try:
+            runs = temp / ".ai-governance/runs"
+            older = runs / "20260101-000000-older-pending"
+            newer = runs / "20260202-000000-newer-approved"
+            for run_dir in (older, newer):
+                run_dir.mkdir(parents=True)
+                dump_yaml(run_dir / "workflow-recommendation.yaml", {
+                    "version": 1,
+                    "workflow_recommendation": {"request_goal": {"type": "implementation"}},
+                })
+            # newer run is fully through its gate; older is not
+            (newer / ".workflow-approved").write_text("t\n", encoding="utf-8")
+            (newer / ".technical-plan-approved").write_text("t\n", encoding="utf-8")
+            dump_yaml(newer / "approved-technical-plan.yaml", {"version": 1})
+            os.utime(older, (1_600_000_000, 1_600_000_000))
+            os.utime(newer, (1_700_000_000, 1_700_000_000))
+            output = self._invoke(temp, str(temp / "app/main.py"))
+            self.assertEqual("deny", self._decision(output))
+            self.assertIn("older-pending", output["hookSpecificOutput"]["permissionDecisionReason"])
+        finally:
+            shutil.rmtree(temp)
+
+    def test_hook_resolves_goal_type_under_request_goal_not_decoy_type(self):
+        """Goal type must be read at workflow_recommendation.request_goal.type, not
+        by first-match. A decoy `type:` earlier in the file must not downgrade a
+        governed implementation run to an ungoverned one."""
+        temp = Path(tempfile.mkdtemp())
+        try:
+            run_dir = temp / ".ai-governance/runs/20260714-000000-decoy"
+            run_dir.mkdir(parents=True)
+            dump_yaml(run_dir / "workflow-recommendation.yaml", {
+                "version": 1,
+                "workflow_recommendation": {
+                    "kind": {"type": "analysis_only"},  # decoy that precedes request_goal
+                    "request_goal": {"type": "implementation"},
+                },
+            })
+            output = self._invoke(temp, str(temp / "app/main.py"))
+            self.assertEqual("deny", self._decision(output))
+        finally:
+            shutil.rmtree(temp)
+
+    def test_hook_reads_top_level_diff_status_not_nested_low_risk_status(self):
+        """diff-verification status is the top-level `status`. A nested
+        `low_risk_intent_check.status: blocked` emitted before it must not be
+        mistaken for the overall verdict."""
+        temp = Path(tempfile.mkdtemp())
+        try:
+            run_dir = self._make_run(temp)
+            (run_dir / ".workflow-approved").write_text("t\n", encoding="utf-8")
+            (run_dir / ".technical-plan-approved").write_text("t\n", encoding="utf-8")
+            dump_yaml(run_dir / "approved-technical-plan.yaml", {"version": 1})
+            # nested block (with status: blocked) is emitted before top-level status
+            dump_yaml(run_dir / "diff-verification.yaml", {
+                "version": 1,
+                "low_risk_intent_check": {"status": "blocked"},
+                "status": "pass",
+            })
+            self.assertEqual({}, self._invoke(temp, str(temp / "app/main.py")))
+        finally:
+            shutil.rmtree(temp)
+
+
+class EvidenceAuthenticityTest(unittest.TestCase):
+    """Spot-check that FACT evidence cites locations that actually resolve.
+
+    Confirms references exist; it does not (and must not claim to) verify that the
+    cited location supports the claim. See docs/threat-model.md O3/I5.
+    """
+
+    SCHEMAS = {"schemas": {"dependency_analysis": {
+        "required_fields": ["evidence"],
+        "evidence_required": True,
+        "evidence_path_line_required": True,
+        "confidence_required": True,
+        "evidence_location_must_resolve": True,
+    }}}
+
+    def _validate(self, evidence):
+        project = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, project, ignore_errors=True)
+        (project / "app").mkdir(parents=True)
+        (project / "app/service.py").write_text("line1\nline2\nline3\n", encoding="utf-8")
+        run_dir = project / ".ai-governance/runs/20260714-000000-dep"
+        run_dir.mkdir(parents=True)
+        dump_yaml(run_dir / "dependency-analysis.yaml", {"evidence": evidence})
+        return ArtifactValidator(self.SCHEMAS).validate(
+            run_dir, "dependency_analysis", "dependency-analysis.yaml", project_root=project
+        ), project
+
+    def _fact(self, path, line):
+        return {"fact": "FACT: caller uses this symbol", "path": path, "line": line, "confidence": "high"}
+
+    def test_fact_citing_real_location_passes(self):
+        report, _ = self._validate([self._fact("app/service.py", 2)])
+        self.assertEqual("pass", report["status"], report["errors"])
+
+    def test_fact_citing_missing_file_is_blocked(self):
+        report, _ = self._validate([self._fact("app/ghost.py", 1)])
+        self.assertEqual("blocked", report["status"])
+        self.assertTrue(any("does not exist" in e for e in report["errors"]))
+
+    def test_fact_citing_line_beyond_file_is_blocked(self):
+        report, _ = self._validate([self._fact("app/service.py", 99)])
+        self.assertEqual("blocked", report["status"])
+        self.assertTrue(any("has 3 lines" in e for e in report["errors"]))
+
+    def test_fact_path_escaping_project_is_blocked(self):
+        report, _ = self._validate([self._fact("../../etc/passwd", 1)])
+        self.assertEqual("blocked", report["status"])
+        self.assertTrue(any("escapes the project" in e for e in report["errors"]))
+
+    def test_non_fact_evidence_is_not_location_checked(self):
+        # INFERENCE may reference a planned/hypothetical location; not spot-checked.
+        report, _ = self._validate([
+            {"fact": "INFERENCE: a new handler will live here", "path": "app/ghost.py", "line": 999, "confidence": "low"},
+        ])
+        self.assertEqual("pass", report["status"], report["errors"])
+
+    def test_location_check_skipped_without_project_root(self):
+        # Backward compatible: callers that pass no project_root keep old behavior.
+        project = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, project, ignore_errors=True)
+        run_dir = project / ".ai-governance/runs/20260714-000000-dep"
+        run_dir.mkdir(parents=True)
+        dump_yaml(run_dir / "dependency-analysis.yaml", {"evidence": [self._fact("app/ghost.py", 1)]})
+        report = ArtifactValidator(self.SCHEMAS).validate(run_dir, "dependency_analysis", "dependency-analysis.yaml")
+        self.assertEqual("pass", report["status"], report["errors"])
+
+
+class ManifestVersionConsistencyTest(unittest.TestCase):
+    """All plugin/marketplace manifests must declare the same version so the
+    Claude and Codex packages never advertise different releases."""
+
+    def _at(self, rel, *keys):
+        data = json.loads((ROOT / rel).read_text(encoding="utf-8"))
+        for key in keys:
+            data = data[key]
+        return data
+
+    def test_all_manifest_versions_match(self):
+        versions = {
+            ".claude-plugin/marketplace.json (top)": self._at(".claude-plugin/marketplace.json", "version"),
+            ".claude-plugin/marketplace.json (plugin)": self._at(".claude-plugin/marketplace.json", "plugins", 0, "version"),
+            ".agents/plugins/marketplace.json (top)": self._at(".agents/plugins/marketplace.json", "version"),
+            ".agents/plugins/marketplace.json (plugin)": self._at(".agents/plugins/marketplace.json", "plugins", 0, "version"),
+            ".claude-plugin/plugin.json": self._at("plugins/adaptive-change-governance/.claude-plugin/plugin.json", "version"),
+            ".codex-plugin/plugin.json": self._at("plugins/adaptive-change-governance/.codex-plugin/plugin.json", "version"),
+        }
+        self.assertEqual(1, len(set(versions.values())), f"manifest versions drift: {versions}")
 
 
 if __name__ == "__main__":
