@@ -3,6 +3,17 @@ version: 1
 scenarios:
   - id: menu-label-change
     request: 把后台「群配置」相关的菜单修改为「业务群配置」
+    # text_only 只认模型 intent：宿主模型判定这是菜单文案改动，才走轻流程。
+    intent:
+      change_kind: menu_label_change
+      change_nature: display_text_only
+      risk_hints:
+        data_operation: false
+        database_schema_change: false
+        public_interface_change: false
+        permission_change: false
+        security_change: false
+        financial_change: false
     repository:
       files:
         frontend/src/layouts/BotLayout.vue: "<span>群配置</span>\n"

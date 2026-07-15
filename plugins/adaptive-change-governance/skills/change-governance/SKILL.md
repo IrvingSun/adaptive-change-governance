@@ -38,7 +38,7 @@ Required behavior:
 - Do not let keyword matches override clear low-risk user intent unless code evidence is strong.
 - Analyze current repository state before scoring risk.
 - Apply hard guardrails before workflow composition.
-- Keep simple menu/copy changes lightweight unless strong evidence shows real data, interface, permission, or deletion impact.
+- Keep simple menu/copy changes lightweight unless strong evidence shows real data, interface, permission, or deletion impact. This now depends entirely on you: there is no keyword fallback, so a copy/menu/comment change is only routed lightweight when your intent file declares a low-risk `change_kind` (`copy_change`, `menu_label_change`, `ui_text_change`, `documentation_change`, `comment_change`) or `change_nature` (`comment_only`, `documentation_only`, `display_text_only`, `metadata_only`) **and** sets every risk hint to false. Without that, a trivial edit scores heavier — the system errs strict rather than guessing from wording. Declare it only when it is true; `--verify-diff` checks the diff against the claim.
 - Treat weak-only guardrail signals as candidates for confirmation, not as hard minimum level triggers.
 - Consider configured `file_risk` when explaining risk: small edits in database/auth/scheduler/API files can require heavier workflow than similar-sized UI text edits.
 - Distinguish inherent file risk from effective change risk. If the model classifies a high-risk file change as comment-only or docs-only, record that as intent and require later diff verification.

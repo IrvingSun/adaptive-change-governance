@@ -98,6 +98,7 @@ Remaining gaps:
 - Framework route discovery and dynamic invocation remain UNKNOWN when not directly visible.
 - Cross-service (out-of-repo) consumers are not visible to the static scan and remain a host-model / reassessment concern.
 - Request-text keywords are deliberately kept as a conservative escalation floor, not demoted to localization-only. With host-model localization now bridging the language gap, false negatives are covered by `relevant_files` + `domain_hints`; the request keywords are retained because letting model presence suppress a keyword-triggered guardrail would violate spec 3.3 (model may add risk, never remove it). Over-triggering is resolved at the human review gate, not by the model.
+- Request wording can no longer *lower* risk. The `_is_text_only_change` keyword heuristic was removed: display-text-only is a property of the intended change, not of the current code or the request phrasing, and it was the one place a literal match could suppress risk. `text_only_change` now comes only from a host-model intent classification (`is_low_risk_intent`: a low-risk `change_kind`/`change_nature` with no risk hints), and remains subject to `--verify-diff`. Consequence: without an intent file, trivial edits (a comment or copy change) are no longer auto-routed to L1 and will score heavier — the system errs strict rather than guessing lightweight.
 
 ### Phase 3: Risk Scoring
 

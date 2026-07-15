@@ -76,7 +76,9 @@ class Phase1Test(unittest.TestCase):
         self.assertGreaterEqual({"L1": 1, "L2": 2, "L3": 3, "L4": 4}[risk["final_level"]], 3)
 
     def test_low_risk_copy_change_can_remain_lightweight(self):
-        evidence = RepositoryAnalyzer(ROOT).analyze("修改后台订单页面上的提示文案。", self.project_risk)
+        # 轻流程只能由模型 intent 判定，不再由请求措辞猜测。
+        intent = {"change_kind": "copy_change", "change_nature": "display_text_only", "risk_hints": {}}
+        evidence = RepositoryAnalyzer(ROOT).analyze("修改后台订单页面上的提示文案。", self.project_risk, intent=intent)
         risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)
         workflow = WorkflowComposer(self.project_risk, self.modules).compose(evidence, risk)
         rec = workflow["workflow_recommendation"]
@@ -84,7 +86,10 @@ class Phase1Test(unittest.TestCase):
         self.assertEqual(["code_fact_scan", "regression_test"], rec["required_modules"])
         self.assertTrue(any(item["module"] == "technical_design" for item in rec["skipped_modules"]))
 
-    def test_menu_label_change_remains_lightweight_despite_unrelated_keywords(self):
+    def test_menu_label_change_without_model_intent_is_not_auto_lightweight(self):
+        # 请求措辞不再能把风险压低：没有模型 intent 时，同一个菜单文案请求不走轻流程。
+        # 系统宁可因为无关代码信号（handler.py 里的 delete 字符串）往严里错，
+        # 也不靠字面猜测去抑制风险。轻流程由 test_model_intent_can_route_... 覆盖。
         temp = Path(tempfile.mkdtemp())
         try:
             (temp / "frontend/src/layouts").mkdir(parents=True)
@@ -99,14 +104,12 @@ class Phase1Test(unittest.TestCase):
             evidence = RepositoryAnalyzer(temp).analyze("把后台「群配置」相关的菜单修改为「业务群配置」", self.project_risk)
             risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)
             workflow = WorkflowComposer(self.project_risk, self.modules).compose(evidence, risk)
-            self.assertTrue(evidence["code_findings"]["text_only_change"])
-            boundary = evidence["code_findings"]["feature_boundary"]
-            self.assertEqual("high", boundary["summary"]["confidence"])
-            self.assertTrue(any(item["path"] == "frontend/src/layouts/BotLayout.vue" for item in boundary["included_files"]))
-            self.assertEqual([], risk["triggered_guardrails"])
-            self.assertEqual("L1", risk["final_level"])
-            self.assertEqual(["code_fact_scan", "regression_test"], workflow["workflow_recommendation"]["required_modules"])
-            self.assertNotIn("direct_production_execution", workflow["workflow_recommendation"]["prohibited"])
+            self.assertFalse(evidence["code_findings"]["text_only_change"])
+            self.assertNotEqual("L1", risk["final_level"])
+            self.assertNotEqual(
+                ["code_fact_scan", "regression_test"],
+                workflow["workflow_recommendation"]["required_modules"],
+            )
         finally:
             shutil.rmtree(temp)
 
@@ -159,7 +162,8 @@ class Phase1Test(unittest.TestCase):
         try:
             (ui_temp / "frontend/src/layouts").mkdir(parents=True)
             (ui_temp / "frontend/src/layouts/BotLayout.vue").write_text("<span>群配置</span>\n", encoding="utf-8")
-            ui_evidence = RepositoryAnalyzer(ui_temp).analyze("把后台「群配置」相关的菜单修改为「业务群配置」", self.project_risk)
+            ui_intent = {"change_kind": "menu_label_change", "change_nature": "display_text_only", "risk_hints": {}}
+            ui_evidence = RepositoryAnalyzer(ui_temp).analyze("把后台「群配置」相关的菜单修改为「业务群配置」", self.project_risk, intent=ui_intent)
             ui_risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(ui_evidence)
 
             (db_temp / "app").mkdir(parents=True)

@@ -100,7 +100,11 @@ class RepositoryAnalyzer:
         request_domain_evidence = self._keyword_evidence(request, domain_keywords, "user_request")
         file_domains = self._domains_from_paths(direct_files, domain_keywords)
         request_goal = intent.get("request_goal") or infer_request_goal_from_text(request)
-        text_only_change = is_low_risk_intent(intent) or self._is_text_only_change(request)
+        # Display-text-only is a judgment about the intended change, which cannot be
+        # read from current code and must not be guessed from request wording: a
+        # keyword rule here is the one place where a literal match could *suppress*
+        # risk. Only a host-model intent classification can lighten the workflow.
+        text_only_change = is_low_risk_intent(intent)
         change_types = sorted(set(self._match_keywords(request, CHANGE_TYPE_KEYWORDS) + self._change_types_from_paths(direct_files)))
         if text_only_change:
             change_types = self._text_only_change_types(change_types)
@@ -480,25 +484,6 @@ class RepositoryAnalyzer:
             criteria.append("FACT: request contains explicit requirement language; preserve stated behavior.")
         criteria.append("INFERENCE: change should satisfy the user request without introducing regression in affected modules.")
         return criteria
-
-    def _is_text_only_change(self, request: str) -> bool:
-        lower = request.lower()
-        text_markers = ["文案", "提示", "标题", "菜单", "显示名", "label", "title", "copy", "rename"]
-        change_markers = ["修改", "改为", "更名", "重命名", "rename", "change"]
-        risky_markers = [
-            "删除",
-            "移除",
-            "数据库",
-            "数据",
-            "接口",
-            "api",
-            "权限",
-            "delete",
-            "remove",
-            "database",
-            "sql",
-        ]
-        return any(marker in lower for marker in text_markers) and any(marker in lower for marker in change_markers) and not any(marker in lower for marker in risky_markers)
 
     def _text_only_change_types(self, change_types: list[str]) -> list[str]:
         allowed = {"documentation", "configuration"}
