@@ -33,6 +33,22 @@ from .risk_evaluator import LEVEL_ORDER, RiskEvaluator
 
 RUNS_PREFIX = ".ai-governance/runs/"
 
+# Changing the gate is not an ordinary change. A pull request that edits the gate's
+# code, its rules, or its workflow can otherwise score itself with the very code it
+# just rewrote. Any diff touching these always requires human review, whatever the
+# computed level. This check only holds when the gate runs from the *base* revision
+# (see .github/workflows/change-governance.yml) — code from the pull request could
+# simply delete it.
+GOVERNANCE_PATHS = (
+    ".github/workflows/",
+    ".github/CODEOWNERS",
+    "CODEOWNERS",
+    "bin/change-assess",
+    "lib/adaptive_change_governance/",
+    "plugins/adaptive-change-governance/",
+    ".ai-governance/",
+)
+
 # Destructive statements detected in *added* diff lines. At CI time the real diff is
 # available, so this is precise: it fires on what the change introduces, not on a
 # string that merely exists somewhere in a touched file.
@@ -67,11 +83,16 @@ class CiGate:
         evidence = self._build_evidence(changed, added)
         risk = RiskEvaluator(self.project_risk, self.guardrails, self.calibration).evaluate(evidence)
         level = str(risk.get("final_level", "L1"))
-        blocking = LEVEL_ORDER.get(level, 1) >= LEVEL_ORDER.get(self.fail_level, 3)
+        governance_files = [path for path in changed if path.startswith(GOVERNANCE_PATHS)]
+        blocking = (
+            LEVEL_ORDER.get(level, 1) >= LEVEL_ORDER.get(self.fail_level, 3)
+            or bool(governance_files)
+        )
         return {
             "version": 1,
             "base_ref": base_ref,
             "changed_files": changed,
+            "governance_files": governance_files,
             "final_level": level,
             "fail_level": self.fail_level,
             "status": "review_required" if blocking else "pass",
@@ -84,7 +105,9 @@ class CiGate:
             "notes": [
                 "FACT: this verdict is computed server-side from the diff only; no request text or model intent is used.",
                 "DECISION: a blocking verdict means a human must review and approve this pull request, not that the change is wrong.",
-            ],
+            ] + ([
+                "DECISION: this pull request changes the governance gate itself, so it requires human review regardless of level.",
+            ] if governance_files else []),
         }
 
     def render_markdown(self, report: dict[str, Any]) -> str:
@@ -100,6 +123,11 @@ class CiGate:
             "",
         ]
         lines.extend(f"- DECISION: {item}" for item in report.get("triggered_guardrails", []) or ["none"])
+        governance_files = report.get("governance_files", []) or []
+        if governance_files:
+            lines.extend(["", "## Governance-critical files changed", ""])
+            lines.extend(f"- DECISION: {item}" for item in governance_files[:20])
+            lines.append("- DECISION: changing the gate itself always requires human review.")
         lines.extend(["", "## Affected domains", ""])
         lines.extend(f"- FACT: {item}" for item in report.get("affected_domains", []) or ["none"])
         lines.extend(["", "## Blast radius", ""])
@@ -124,6 +152,7 @@ class CiGate:
             "version": 1,
             "base_ref": base_ref,
             "changed_files": [],
+            "governance_files": [],
             "final_level": "L1",
             "fail_level": self.fail_level,
             "status": "pass",

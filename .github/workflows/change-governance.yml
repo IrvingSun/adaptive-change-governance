@@ -1,19 +1,30 @@
 name: Change Governance
 
-# Real enforcement lives here, not in the local hook. A PreToolUse hook only covers
-# editing tools, can be turned off with ACG_HOOK_MODE, and does not exist on the
-# Codex CLI — an agent with shell access can write around all of it. This job runs
-# where the agent cannot write, and scores the diff from code facts alone.
+# Scores a pull request server-side, from code facts in the diff alone.
 #
-# The check must be *clearable*, or it is useless as a required check: GitHub does
-# not let a review approval override a failing required check, so a gate that simply
-# failed on high risk would make every L3/L4 pull request unmergeable forever.
-# Instead, a high-risk pull request fails until a human other than the author submits
-# an approving review, then passes. That is why pull_request_review is a trigger —
-# GitHub does not re-run pull_request workflows when a review is submitted.
+# TRUST MODEL — read before relying on this:
 #
-# Make it binding: mark "governance-gate" a required status check on protected
-# branches. A review approval is the one signal an agent cannot forge.
+# For `pull_request`, GitHub runs the workflow definition *from the pull request*.
+# So this file cannot be its own trust anchor: a pull request may edit it. What this
+# job does is narrow the hole, not close it:
+#
+#   * the gate's code and rules are checked out from the BASE revision and run from
+#     there, against the pull request's tree. Rewriting ci_gate.py or guardrails.yaml
+#     inside the pull request therefore does not change how that pull request is
+#     scored;
+#   * the base-revision gate forces "review required" for any diff that touches
+#     governance-critical paths (see GOVERNANCE_PATHS in ci_gate.py).
+#
+# The remaining hole is this file itself. Closing it needs repository settings that
+# an agent cannot edit:
+#
+#   1. mark "governance-gate" a required status check on protected branches;
+#   2. require review from Code Owners, with .github/CODEOWNERS covering
+#      .github/workflows/**, bin/change-assess, lib/adaptive_change_governance/**,
+#      plugins/**, and .ai-governance/**.
+#
+# Without (1) and (2) this workflow is advisory, not a boundary. Do not describe it
+# as one.
 
 on:
   pull_request:
@@ -27,11 +38,23 @@ permissions:
 jobs:
   governance-gate:
     runs-on: ubuntu-latest
+    env:
+      # github.base_ref is only populated for pull_request events; on
+      # pull_request_review it is empty, which would make the base ref "origin/",
+      # fail merge-base, and leave the check permanently unclearable. The payload
+      # field is present for both events.
+      BASE_REF: ${{ github.event.pull_request.base.ref }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out pull request (the thing being scored)
+        uses: actions/checkout@v4
         with:
           # Full history so the merge base with the target branch is reachable.
           fetch-depth: 0
+      - name: Check out governance tool from the base revision (the thing doing the scoring)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: .governance-tool
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -41,10 +64,19 @@ jobs:
         id: gate
         run: |
           set +e
-          python bin/change-assess \
-            --ci-gate "origin/${{ github.base_ref }}" \
+          # Run the base revision's code, with the base revision's rules, against the
+          # pull request working tree. Config paths must be absolute: change-assess
+          # prefers the project's own .ai-governance/ when given a relative path,
+          # which would hand the rules back to the pull request.
+          TOOL="$PWD/.governance-tool"
+          python "$TOOL/bin/change-assess" \
+            --ci-gate "origin/$BASE_REF" \
             --ci-fail-level L3 \
-            --ci-output gate-summary.md
+            --ci-output gate-summary.md \
+            --risk-profile "$TOOL/.ai-governance/project-risk.yaml" \
+            --guardrails "$TOOL/.ai-governance/guardrails.yaml" \
+            --workflow-modules "$TOOL/.ai-governance/workflow-modules.yaml" \
+            --risk-calibration "$TOOL/.ai-governance/risk-calibration.yaml"
           code=$?
           set -e
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"

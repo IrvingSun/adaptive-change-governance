@@ -1,0 +1,19 @@
+# The governance gate cannot protect itself: for `pull_request`, GitHub runs the
+# workflow definition from the pull request, so a change can rewrite the gate that
+# judges it. Code owner review is the anchor that lives outside the pull request.
+#
+# This file only has effect once "Require review from Code Owners" is enabled in
+# branch protection for the protected branches. Without that setting it is inert.
+#
+# Replace @OWNER with the real owning user or team.
+
+# The gate's own workflow definition — the one thing a pull request could otherwise
+# rewrite to score itself green.
+/.github/workflows/    @OWNER
+/.github/CODEOWNERS    @OWNER
+
+# Gate entrypoint, scoring code, and the rules it enforces.
+/bin/change-assess                @OWNER
+/lib/adaptive_change_governance/  @OWNER
+/plugins/                         @OWNER
+/.ai-governance/                  @OWNER

@@ -24,7 +24,7 @@ from adaptive_change_governance.intent_model import normalize_intent
 from adaptive_change_governance.reassessment import ReassessmentRunner
 from adaptive_change_governance.repository_analyzer import RepositoryAnalyzer
 from adaptive_change_governance.run_retention import cleanup_runs
-from adaptive_change_governance.risk_evaluator import RiskEvaluator
+from adaptive_change_governance.risk_evaluator import LEVEL_ORDER, RiskEvaluator
 from adaptive_change_governance.schema_validator import ValidationError, validate_all, validate_risk_calibration
 from adaptive_change_governance.workflow_composer import WorkflowComposer
 
@@ -1827,6 +1827,29 @@ class CiGateTest(unittest.TestCase):
             self.assertEqual([], report["affected_domains"])
             self.assertEqual([], report["triggered_guardrails"])
             self.assertEqual("pass", report["status"])
+        finally:
+            shutil.rmtree(temp)
+
+    def test_ci_gate_always_requires_review_when_the_gate_itself_changes(self):
+        # A pull request that edits the gate's rules or code must not be able to wave
+        # itself through, whatever the computed level.
+        temp = Path(tempfile.mkdtemp())
+        try:
+            self._repo(temp)
+            (temp / "README.md").write_text("# hi\n", encoding="utf-8")
+            self._commit(temp, "base")
+            (temp / ".ai-governance").mkdir()
+            (temp / ".ai-governance/guardrails.yaml").write_text("version: 1\nhard_guardrails: []\n", encoding="utf-8")
+            self._commit(temp, "relax the rules")
+            report = CiGate(temp, self.project_risk, self.guardrails).run("HEAD~1")
+            self.assertIn(".ai-governance/guardrails.yaml", report["governance_files"])
+            self.assertEqual("review_required", report["status"])
+            # The level alone would not have blocked this: the verdict comes from
+            # touching the gate itself.
+            self.assertLess(
+                LEVEL_ORDER[report["final_level"]],
+                LEVEL_ORDER[report["fail_level"]],
+            )
         finally:
             shutil.rmtree(temp)
 
