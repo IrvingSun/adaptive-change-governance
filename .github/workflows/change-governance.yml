@@ -68,6 +68,11 @@ jobs:
           # pull request working tree. Config paths must be absolute: change-assess
           # prefers the project's own .ai-governance/ when given a relative path,
           # which would hand the rules back to the pull request.
+          #
+          # Pin EVERY config that cli.py resolves through _config_path, not just the
+          # ones that affect scoring. All five are loaded and validated before the
+          # --ci-gate dispatch, so a pull request that breaks any of them fails the
+          # gate with exit 2 — which no approval can clear.
           TOOL="$PWD/.governance-tool"
           python "$TOOL/bin/change-assess" \
             --ci-gate "origin/$BASE_REF" \
@@ -76,7 +81,8 @@ jobs:
             --risk-profile "$TOOL/.ai-governance/project-risk.yaml" \
             --guardrails "$TOOL/.ai-governance/guardrails.yaml" \
             --workflow-modules "$TOOL/.ai-governance/workflow-modules.yaml" \
-            --risk-calibration "$TOOL/.ai-governance/risk-calibration.yaml"
+            --risk-calibration "$TOOL/.ai-governance/risk-calibration.yaml" \
+            --artifact-schemas "$TOOL/.ai-governance/artifact-schemas.yaml"
           code=$?
           set -e
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"

@@ -17,4 +17,9 @@ done
 rsync -a --delete "$ROOT/.ai-governance/profiles/" "$PLUGIN/.ai-governance/profiles/"
 rsync -a --delete "$ROOT/.ai-governance/templates/" "$PLUGIN/.ai-governance/templates/"
 
+# Bytecode is a local build artifact, and running the tests or the hook recreates it
+# inside the package. rsync's --exclude also shields it from --delete, so clear it
+# explicitly and leave a clean package behind.
+find "$PLUGIN" -type d -name '__pycache__' -prune -exec rm -rf {} +
+
 echo "plugin runtime synced from root tree"

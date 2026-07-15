@@ -357,6 +357,8 @@ change-assess --ci-gate origin/main --ci-fail-level L3 --ci-output gate-summary.
 
 Its job is to catch what the local flow missed: even if the agent skipped every local step, the pull request still gets one uniform, visible, auditable verdict before merge. `.github/workflows/change-governance.yml` runs it on every pull request.
 
+Known artifact: run against *this* repository, the gate flags `financial-calculation` and `physical-device-control`, because its own test fixtures and pattern definitions literally contain `power_off(...)` and `round(price * qty, 2)`. That is self-reference, not a finding on a normal target repository.
+
 ### The ladder
 
 Adopt as much as you need; each step is optional and independently useful:
@@ -379,9 +381,6 @@ For `pull_request`, GitHub runs the workflow definition **from the pull request*
 
 The remaining hole is the workflow file itself, which those two layers live in. Only a repository setting closes it: enable **Require review from Code Owners** with `.github/CODEOWNERS` (shipped; replace `@OWNER`) covering the governance paths.
 
-Known artifact: run against this repository, the gate flags `financial-calculation` and `physical-device-control`, because its own test fixtures and pattern definitions literally contain `power_off(...)` and `round(price * qty, 2)`. That is self-reference, not a finding on a normal target repository.
-
-Known artifact: run against this repository, the gate flags `financial-calculation` and `physical-device-control`, because its own test fixtures and pattern definitions literally contain `power_off(...)` and `round(price * qty, 2)`. That is self-reference, not a finding on a normal target repository.
 
 ## Development
 
