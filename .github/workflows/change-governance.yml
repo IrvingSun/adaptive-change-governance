@@ -1,30 +1,28 @@
 name: Change Governance
 
-# Scores a pull request server-side, from code facts in the diff alone.
+# Gives every pull request one uniform, auditable risk verdict, scored server-side
+# from code facts in the diff alone. This is step 2 of the ladder in README
+# ("How much it actually holds").
 #
-# TRUST MODEL — read before relying on this:
+# On its own this job is ADVISORY: it only affects merging once "governance-gate" is
+# a required status check on protected branches (step 3). That is the normal setup —
+# local hook + CI gate + required check — and it is enough for process governance,
+# audit, and a merge-time risk review.
 #
-# For `pull_request`, GitHub runs the workflow definition *from the pull request*.
-# So this file cannot be its own trust anchor: a pull request may edit it. What this
-# job does is narrow the hole, not close it:
+# The two layers below are free and need no configuration, but they answer a
+# stronger threat model (step 4: a pull request rewriting the gate that judges it).
+# Do not read them as prerequisites:
 #
 #   * the gate's code and rules are checked out from the BASE revision and run from
-#     there, against the pull request's tree. Rewriting ci_gate.py or guardrails.yaml
-#     inside the pull request therefore does not change how that pull request is
-#     scored;
-#   * the base-revision gate forces "review required" for any diff that touches
-#     governance-critical paths (see GOVERNANCE_PATHS in ci_gate.py).
+#     there against the pull request's tree, so rewriting ci_gate.py or
+#     guardrails.yaml inside a pull request does not change how it is scored;
+#   * that base-revision gate forces "review required" for any diff touching
+#     GOVERNANCE_PATHS (see ci_gate.py).
 #
-# The remaining hole is this file itself. Closing it needs repository settings that
-# an agent cannot edit:
-#
-#   1. mark "governance-gate" a required status check on protected branches;
-#   2. require review from Code Owners, with .github/CODEOWNERS covering
-#      .github/workflows/**, bin/change-assess, lib/adaptive_change_governance/**,
-#      plugins/**, and .ai-governance/**.
-#
-# Without (1) and (2) this workflow is advisory, not a boundary. Do not describe it
-# as one.
+# Those two layers live in this file, and for `pull_request` GitHub runs the
+# workflow definition *from the pull request* — so this file is not its own trust
+# anchor. Only .github/CODEOWNERS plus "Require review from Code Owners" closes
+# that, and only if you decide you need step 4.
 
 on:
   pull_request:

@@ -397,6 +397,16 @@ python3 -m pip install PyYAML mypy types-PyYAML
 scripts/check.sh   # mypy + tests, matching CI
 ```
 
+### Packaging
+
+Build the plugin package from Git, not from the working tree:
+
+```bash
+git archive HEAD plugins/adaptive-change-governance | tar -x -C <dest>
+```
+
+`git archive` ships only tracked files, so `__pycache__` and other ignored artifacts cannot leak in. Copying the directory instead does pick them up: running the tests or the hook recreates bytecode inside `plugins/` at any time. `scripts/sync-plugin.sh` clears it, but that only holds until the next test run — do not rely on the working tree being clean at the moment you package.
+
 `scripts/check.sh` prefers `.venv/bin/python` when present. To run the steps individually:
 
 ```bash
