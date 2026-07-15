@@ -4,7 +4,12 @@ Reusable change governance and workflow routing for AI coding agents.
 
 ## Quick Start
 
-Adaptive Change Governance is a safety layer for AI coding agents. It assesses a requested change, writes audit artifacts, recommends the right workflow, and blocks implementation until the required gates are approved.
+Adaptive Change Governance is a change-governance layer for AI coding agents. It assesses a requested change, writes audit artifacts, recommends the right workflow, and holds implementation until the required gates are approved.
+
+Be precise about what "holds" means, because it decides how much you can rely on it:
+
+- **Locally it is collaboration discipline, not a sandbox.** The agent is the enforcement; the `PreToolUse` hook only raises the bypass cost. An agent with shell access can write around it, and the Codex CLI ships no hook at all. See [Enforcement boundary](#enforcement-boundary).
+- **Server-side it is a real gate.** `--ci-gate` scores a pull request diff in CI, where the agent cannot write, and hands the verdict to branch protection and human review.
 
 Install the Python dependency used by the CLI:
 
@@ -329,7 +334,29 @@ After install, use:
 
 The plugin contributes a `change-assess` executable to Claude Code's Bash PATH. It requires `PyYAML` in the Python environment used by `python3`.
 
-The plugin also registers a `PreToolUse` hook (`hooks/implementation_gate.py`) that enforces the implementation gate at the harness level: while a governance run with an implementation goal has not passed `--check-gate --stage implementation`, `Edit`/`Write` tool calls on project files are denied, and gate-state files under `.ai-governance/runs/` (approval markers, `human-review.yaml`, verification reports) may only be written through the CLI. Set `ACG_HOOK_MODE=warn` to log instead of block, or `ACG_HOOK_MODE=off` to disable. Known residual risk: the hook intercepts file-editing tools only — shell-based edits (`sed`, `tee`, ...) are not intercepted, so the hook raises the bypass cost but is not a sandbox.
+The plugin also registers a `PreToolUse` hook (`hooks/implementation_gate.py`): while a governance run with an implementation goal has not passed `--check-gate --stage implementation`, `Edit`/`Write` tool calls on project files are denied, and gate-state files under `.ai-governance/runs/` (approval markers, `human-review.yaml`, verification reports) may only be written through the CLI. Set `ACG_HOOK_MODE=warn` to log instead of block, or `ACG_HOOK_MODE=off` to disable.
+
+## Enforcement boundary
+
+The local hook is a speed bump, not a security boundary. Do not present it as one:
+
+- **It only matches editing tools** (`Edit|Write|MultiEdit|NotebookEdit`). A shell write is not intercepted — including a write to a gate-state file. `echo "" > .ai-governance/runs/<run>/.workflow-approved` forges a human approval, which defeats the premise of the gate rather than merely working around it.
+- **It can disable itself.** `ACG_HOOK_MODE=off` is an environment variable the agent can export.
+- **Codex has no hook at all.** `.codex-plugin/plugin.json` declares only `skills`; there, the SKILL is the whole gate and enforcement is self-discipline.
+
+Widening the hook to `Bash` does not fix this: intercepting arbitrary shell (`>`, `tee`, `sed -i`, `python -c`, heredocs, generated scripts) is whack-a-mole, and an agent with shell access on the same machine cannot be constrained by local file gates — it could sign forged state with any key it can read.
+
+Put enforcement where the agent cannot write:
+
+```bash
+change-assess --ci-gate origin/main --ci-fail-level L3 --ci-output gate-summary.md
+```
+
+`--ci-gate` scores the diff against a base ref **from code facts only** — no request text and no intent file, so nothing in the working tree can talk the verdict down. Domains come from `code_signals` on the changed code, destructive operations from statements the diff *adds*, blast radius from `reference_scanner`, plus configured `file_risk`. It exits `3` when the level reaches `--ci-fail-level` (default `L3`), meaning *a human must review this*, not *this change is wrong*.
+
+`.github/workflows/change-governance.yml` runs it on every pull request. To make it binding, mark `governance-gate` as a required status check and require a human review on protected branches — a review approval is the one signal an agent cannot forge.
+
+Known artifact: run against this repository, the gate flags `financial-calculation` and `physical-device-control`, because its own test fixtures and pattern definitions literally contain `power_off(...)` and `round(price * qty, 2)`. That is self-reference, not a finding on a normal target repository.
 
 ## Development
 

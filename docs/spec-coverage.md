@@ -220,8 +220,19 @@ Implemented after the initial spec:
 - Guardrail suppression consistency: `requires_code_change: false` only disarms guardrails for analysis/decision goals, never for implementation or planning goals.
 - Honest technical-plan module coverage (`covered` only with completed progress steps; guardrail analysis modules block plan approval until completed).
 - Automatic `.ai-governance/runs/.gitignore` in `gitignored` audit mode.
-- Claude Code `PreToolUse` hook enforcing the implementation gate and protecting gate-state files (`ACG_HOOK_MODE=enforce|warn|off`).
+- Claude Code `PreToolUse` hook enforcing the implementation gate and protecting gate-state files (`ACG_HOOK_MODE=enforce|warn|off`). Local only, and advisory — see "Enforcement boundary" below.
+- Server-side CI gate (`--ci-gate <base_ref>`, `ci_gate.py`, `.github/workflows/change-governance.yml`): scores a pull request diff from code facts alone (no request, no intent), exits `3` above `--ci-fail-level`, and delegates blocking to branch protection plus human review.
 - Plugin runtime sync script (`scripts/sync-plugin.sh`) with drift-detection tests, mypy config, and GitHub Actions CI.
+
+## Enforcement Boundary
+
+Stated plainly, because the rest of this document describes gates and it would be easy to read them as binding:
+
+- **Local gates are collaboration discipline, not a security boundary.** The `PreToolUse` hook matches only `Edit|Write|MultiEdit|NotebookEdit`. A shell write bypasses it — including a write to a protected gate-state file, so `echo "" > .ai-governance/runs/<run>/.workflow-approved` forges a human approval. The hook is also self-disabling via `ACG_HOOK_MODE=off`.
+- **Codex has no hook.** `.codex-plugin/plugin.json` declares only `skills`; the SKILL's MUST rules are the entire gate.
+- **Widening the hook to `Bash` is not a fix.** Parsing arbitrary shell is whack-a-mole, and an agent with shell access on the same host cannot be constrained by local file gates (any signing key it can read, it can use).
+- **Therefore real enforcement is server-side**: `--ci-gate` in CI, made binding by a required status check and required human review. A GitHub review approval is the one signal an agent cannot forge.
+- **Approval identity is lightweight.** `human_review.py` records `reviewer: human_cli_approval` when no reviewer is supplied — a constant string, with no identity, timestamp provenance, or signature. Adequate for local governance; not adequate for an audited, team-level process.
 
 ## Known Non-Goals Still Respected
 

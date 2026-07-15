@@ -19,6 +19,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .code_signals import is_code_file
+
 
 # Paths that, by convention, hold shared contracts. A change here is broad even
 # if the reference count scan under-counts (dynamic consumers, other services).
@@ -62,9 +64,12 @@ def scan_references(root: Path, direct_files: list[str], repo_files: list[str]) 
     # localized file: a file that references the changed symbol is a consumer
     # even if coarse localization also flagged it as directly relevant.
     anchor_sources = set(anchor_to_source.values())
+    # Only code counts as a reference. A symbol named in prose, a changelog, or a
+    # test fixture is a mention, not a caller: counting those inflated blast radius
+    # (README.md became a "module") on this tool's own repository.
     candidates = [
         path for path in sorted(repo_files)
-        if path not in anchor_sources and not _skip(path)
+        if path not in anchor_sources and not _skip(path) and is_code_file(path)
     ][:MAX_REPO_FILES]
 
     inbound_reference_count = 0
@@ -160,7 +165,11 @@ def _reference_hits(text: str, anchors: set[str]) -> list[tuple[str, int]]:
 
 def _top_module(path: str) -> str:
     parts = Path(path).parts
-    return parts[0] if parts else path
+    # A file at the repository root has no owning module; calling it one made
+    # "README.md" show up as a referencing module and inflated the module count.
+    if len(parts) > 1:
+        return parts[0]
+    return "(root)"
 
 
 def _has_shared_path(direct_files: list[str]) -> bool:

@@ -1,0 +1,44 @@
+name: Change Governance
+
+# Real enforcement lives here, not in the local hook. A PreToolUse hook only covers
+# editing tools, can be turned off with ACG_HOOK_MODE, and does not exist on the
+# Codex CLI — an agent with shell access can write around all of it. This job runs
+# where the agent cannot write, and scores the diff from code facts alone.
+#
+# The job only produces a verdict. To make it binding, mark "governance-gate" as a
+# required status check and require a human review on protected branches: a review
+# approval is the one signal an agent cannot forge.
+
+on:
+  pull_request:
+
+jobs:
+  governance-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the merge base with the target branch is reachable.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install PyYAML
+      - name: Score pull request diff
+        id: gate
+        run: |
+          set +e
+          python bin/change-assess \
+            --ci-gate "origin/${{ github.base_ref }}" \
+            --ci-fail-level L3 \
+            --ci-output gate-summary.md
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+      - name: Publish summary
+        if: always()
+        run: cat gate-summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Require human review for high-risk changes
+        if: steps.gate.outputs.exit_code == '3'
+        run: |
+          echo "::error::This pull request reached the review threshold. A human reviewer must approve it."
+          exit 1

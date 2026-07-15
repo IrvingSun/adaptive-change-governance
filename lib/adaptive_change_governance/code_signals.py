@@ -37,16 +37,34 @@ _LINE_RULES: list[tuple[str, re.Pattern[str], list[str]]] = [
 ]
 
 _MONEY_TOKEN = re.compile(r"\b(amount|price|fee|refund|balance|payment|settlement|reconciliation)\b|金额|退款|费用|价格|结算|对账|计费", re.IGNORECASE)
-_MONEY_ARITH = re.compile(r"round\(|Decimal\(|[*/%]|//|\.quantize\(")
+# Precise rounding/decimal markers only. A bare [*/%] matched any division or a
+# comment slash anywhere in a file that merely mentioned "price", which flagged
+# unrelated files as money code.
+_MONEY_ARITH = re.compile(r"round\(|Decimal\(|\.quantize\(")
 
 MAX_FILE_BYTES = 400_000
 MAX_SIGNALS = 200
+
+# Behavior signals only mean something in source code. Prose and fixtures mention
+# `power_off` or `round()` without doing them: scanning a .md or a test-fixture
+# .yaml produced false money/device domains on this tool's own repository.
+CODE_EXTENSIONS = {
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".vue", ".java", ".kt", ".scala", ".go",
+    ".rb", ".php", ".cs", ".rs", ".swift", ".m", ".mm", ".c", ".cc", ".cpp", ".h",
+    ".hpp", ".sql", ".sh", ".bash",
+}
+
+
+def is_code_file(path: str) -> bool:
+    return Path(path).suffix.lower() in CODE_EXTENSIONS
 
 
 def scan_code_signals(root: Path, direct_files: list[str]) -> dict[str, Any]:
     """Return behavior signals and derived strong domain evidence."""
     signals: list[dict[str, Any]] = []
     for path in direct_files:
+        if not is_code_file(path):
+            continue
         text = _read(root / path)
         if not text:
             continue

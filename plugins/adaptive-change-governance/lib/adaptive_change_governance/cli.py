@@ -18,6 +18,7 @@ from .next_action import NextActionPlanner
 from .progress import ProgressTracker
 from .reassessment import ReassessmentRunner
 from .repository_analyzer import RepositoryAnalyzer
+from .ci_gate import CiGate, CiGateError
 from .risk_evaluator import RiskEvaluator, render_risk_markdown
 from .risk_config_suggester import RiskConfigSuggester
 from .risk_scenarios import RiskScenarioValidator
@@ -63,6 +64,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--complete-step", help="Mark one workflow module as completed for an existing run id or run directory")
     parser.add_argument("--validate-artifact", help="Validate one module artifact for an existing run id or run directory")
     parser.add_argument("--validate-risk-scenarios", action="store_true", help="Validate configured risk scoring scenarios")
+    parser.add_argument("--ci-gate", metavar="BASE_REF", help="Score the diff against BASE_REF server-side (no request, no intent) and fail when review is required")
+    parser.add_argument("--ci-fail-level", default="L3", choices=["L1", "L2", "L3", "L4"], help="Level at which --ci-gate requires human review (default L3)")
+    parser.add_argument("--ci-output", help="Optional path to write the CI gate markdown summary")
     parser.add_argument("--suggest-risk-config", action="store_true", help="Write project-specific file_risk suggestions without modifying governance config")
     parser.add_argument("--apply-risk-config", action="store_true", help="With --suggest-risk-config, apply the suggested project-risk.yaml after explicit confirmation")
     parser.add_argument("--check-gate", help="Check whether a run may enter a stage")
@@ -175,6 +179,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.validate_risk_scenarios:
         return _validate_risk_scenarios(root, tool_root, args, project_risk, guardrails, risk_calibration)
+
+    if args.ci_gate:
+        return _ci_gate(root, args, project_risk, guardrails, risk_calibration)
 
     if args.suggest_risk_config:
         return _suggest_risk_config(root, project_risk, apply=args.apply_risk_config)
@@ -520,6 +527,24 @@ def _validate_risk_scenarios(root: Path, tool_root: Path, args: argparse.Namespa
         for error in item.get("errors", []):
             print(f"  {error}")
     return 0 if report.get("status") == "pass" else 3
+
+
+def _ci_gate(root: Path, args: argparse.Namespace, project_risk: dict, guardrails: dict, risk_calibration: dict | None = None) -> int:
+    gate = CiGate(root, project_risk, guardrails, risk_calibration, fail_level=args.ci_fail_level)
+    try:
+        report = gate.run(args.ci_gate)
+    except CiGateError as error:
+        print(f"ERROR: {error}")
+        return 2
+    summary = gate.render_markdown(report)
+    print(summary, end="")
+    if args.ci_output:
+        output = Path(args.ci_output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(summary, encoding="utf-8")
+    # Exit 3 signals "a human must review this", not "the change is wrong". Merge
+    # blocking is branch protection's job; this only supplies the verdict.
+    return 3 if report["status"] == "review_required" else 0
 
 
 def _suggest_risk_config(root: Path, project_risk: dict, apply: bool = False) -> int:

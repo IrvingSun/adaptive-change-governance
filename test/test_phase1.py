@@ -16,6 +16,7 @@ from adaptive_change_governance.config_loader import dump_yaml, load_yaml
 from adaptive_change_governance.artifact_validator import ArtifactValidator
 import adaptive_change_governance.cli as cli_module
 from adaptive_change_governance.artifact_context import apply_validated_artifacts
+from adaptive_change_governance.ci_gate import CiGate
 from adaptive_change_governance.context_adjuster import apply_user_context
 from adaptive_change_governance.diff_verifier import DiffVerifier
 from adaptive_change_governance.human_review import HumanReviewGate, ReviewError
@@ -1731,6 +1732,80 @@ class Phase1Test(unittest.TestCase):
             medium_risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(medium_evidence)
             self.assertIn("physical-device-control", medium_evidence["code_findings"]["affected_domains"])
             self.assertNotIn("physical-device-control", medium_risk["triggered_guardrails"])
+        finally:
+            shutil.rmtree(temp)
+
+
+class CiGateTest(unittest.TestCase):
+    """The CI gate is the only enforcement an agent cannot write around.
+
+    It must score from the diff alone: no request text, no intent file.
+    """
+
+    def setUp(self):
+        self.project_risk = load_yaml(ROOT / ".ai-governance/project-risk.yaml")
+        self.guardrails = load_yaml(ROOT / ".ai-governance/guardrails.yaml")
+
+    def _repo(self, temp: Path) -> None:
+        for args in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
+            subprocess.run(["git", *args], cwd=temp, check=True, capture_output=True)
+
+    def _commit(self, temp: Path, message: str) -> None:
+        subprocess.run(["git", "add", "-A"], cwd=temp, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-q", "-m", message], cwd=temp, check=True, capture_output=True)
+
+    def test_ci_gate_flags_destructive_sql_added_by_the_diff(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            self._repo(temp)
+            (temp / "app").mkdir()
+            (temp / "app/base.py").write_text("VALUE = 1\n", encoding="utf-8")
+            self._commit(temp, "base")
+            (temp / "migrations").mkdir()
+            (temp / "migrations/001_cleanup.sql").write_text(
+                "DELETE FROM device_port_status WHERE duplicated = true;\n", encoding="utf-8"
+            )
+            self._commit(temp, "add cleanup")
+            report = CiGate(temp, self.project_risk, self.guardrails).run("HEAD~1")
+            self.assertIn("delete", report["operations"])
+            self.assertIn("destructive-database-operation", report["triggered_guardrails"])
+            self.assertEqual("L4", report["final_level"])
+            self.assertEqual("review_required", report["status"])
+        finally:
+            shutil.rmtree(temp)
+
+    def test_ci_gate_passes_a_documentation_only_diff(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            self._repo(temp)
+            (temp / "README.md").write_text("# hi\n", encoding="utf-8")
+            self._commit(temp, "base")
+            (temp / "README.md").write_text("# hi\n\nmore words about power_off and refund.\n", encoding="utf-8")
+            self._commit(temp, "docs")
+            report = CiGate(temp, self.project_risk, self.guardrails).run("HEAD~1")
+            # Prose mentioning power_off/refund is not device or money code.
+            self.assertEqual([], report["affected_domains"])
+            self.assertEqual([], report["triggered_guardrails"])
+            self.assertEqual("pass", report["status"])
+        finally:
+            shutil.rmtree(temp)
+
+    def test_ci_gate_scores_code_facts_without_request_or_intent(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            self._repo(temp)
+            (temp / "device").mkdir()
+            (temp / "device/ctl.py").write_text("VALUE = 1\n", encoding="utf-8")
+            self._commit(temp, "base")
+            (temp / "device/ctl.py").write_text(
+                "VALUE = 1\n\ndef stop(port):\n    return protocol.power_off(port)\n", encoding="utf-8"
+            )
+            self._commit(temp, "device change")
+            report = CiGate(temp, self.project_risk, self.guardrails).run("HEAD~1")
+            # No request text and no intent file exist here; the verdict comes from code.
+            self.assertIn("physical-device-control", report["affected_domains"])
+            self.assertIn("physical-device-control", report["triggered_guardrails"])
+            self.assertEqual("review_required", report["status"])
         finally:
             shutil.rmtree(temp)
 

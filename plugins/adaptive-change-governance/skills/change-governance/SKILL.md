@@ -11,54 +11,104 @@ Run from the target repository root:
 change-assess "<user request>" --mode assess --intent-file <intent-file>
 ```
 
-## MUST — gate discipline (you are the enforcement)
+## 1. Hard rules (MUST)
 
-On some hosts a `PreToolUse` hook blocks edits until the implementation gate
-passes. On hosts without that hook (for example the Codex CLI), **no process
-stops you — this skill is the only gate, so you MUST self-enforce it**:
+You are the enforcement. A `PreToolUse` hook blocks file edits on some hosts, but
+it only covers editing tools, it can be switched off, and the Codex CLI ships no
+hook at all. **Assume no process will stop you.**
 
-- You MUST NOT generate a technical plan before workflow approval exists.
-- You MUST NOT modify business code before technical-plan approval AND a passing
-  `change-assess --check-gate <run_id> --stage implementation` (`GATE OK`).
-- You MUST NOT write approval or gate-state files by hand
-  (`.workflow-approved`, `.technical-plan-approved`, `human-review.yaml`,
-  `approved-*.yaml`, verification reports). Only the `change-assess` CLI writes
-  them; editing them directly forges an approval.
-- If you cannot run `change-assess`, STOP and report the blocker. Do not proceed
-  to implementation on an unverified gate.
+1. MUST NOT generate a technical plan before workflow approval exists.
+2. MUST NOT modify business code before technical-plan approval **and** a passing
+   `change-assess --check-gate <run_id> --stage implementation` (`GATE OK`).
+3. MUST NOT write approval or gate-state files by any means — editor, shell
+   redirect, or script. These are `.workflow-approved`, `.technical-plan-approved`,
+   `human-review.yaml`, `approved-*.yaml`, and verification reports. Only the
+   `change-assess` CLI may write them; writing one by hand forges a human approval.
+4. MUST stop after `workflow-plan.md` until human approval is present.
+5. MUST NOT omit a domain or downgrade a risk hint to avoid a gate. Raise concerns
+   through the human review gate, never by shaping the intent file.
+6. If you cannot run `change-assess`, STOP and report the blocker. Never proceed on
+   an unverified gate.
 
-Required behavior:
+## 2. What you produce: the intent file
 
-- Treat user input as request, not code fact.
-- Before running assessment, infer structured intent into a YAML file with change_kind, request_goal, included scope, excluded scope, unknowns, and risk_hints.
-- Do the localization the keyword scanner cannot: read the repository, find the files/symbols this request actually touches, and record them as `relevant_files` (a list of `{path, reason}`). Keyword search fails across a natural-language/code gap (e.g. a Chinese request against English code); your `relevant_files` are what let code signals, file risk, and reference fan-out run on the real code. Only list paths that exist.
-- Judge risk from what that located code does, then record `domain_hints`: a list of `{domain, confidence: high|medium|low, reason, anchors: [{path, line}]}`. Use domains the guardrails recognize (for example `financial-calculation`, `physical-device-control`, `authentication`, `authorization`, `public-interface`, `message-contract`, `database-schema`). Mark `confidence: high` only when the code evidence is clear; high-confidence hints can fire a hard guardrail, lower confidence stays a candidate for confirmation.
-- `domain_hints` are additive: they raise risk but never suppress a domain found by keywords or code signals, and they never lower a hard guardrail (spec 3.3). Do not omit a domain to avoid a gate — use the human review gate to downgrade, not the intent file.
-- Classify `request_goal.type` as `implementation`, `analysis_only`, `decision_support`, or `planning_only` before risk scoring. Analysis-only and decision-support requests stop at their analysis/decision gate and must not be pushed into implementation steps merely because the wording mentions delete, database, API, or permission terms.
-- Do not let keyword matches override clear low-risk user intent unless code evidence is strong.
-- Analyze current repository state before scoring risk.
-- Apply hard guardrails before workflow composition.
-- Keep simple menu/copy changes lightweight unless strong evidence shows real data, interface, permission, or deletion impact. This now depends entirely on you: there is no keyword fallback, so a copy/menu/comment change is only routed lightweight when your intent file declares a low-risk `change_kind` (`copy_change`, `menu_label_change`, `ui_text_change`, `documentation_change`, `comment_change`) or `change_nature` (`comment_only`, `documentation_only`, `display_text_only`, `metadata_only`) **and** sets every risk hint to false. Without that, a trivial edit scores heavier — the system errs strict rather than guessing from wording. Declare it only when it is true; `--verify-diff` checks the diff against the claim.
-- Treat weak-only guardrail signals as candidates for confirmation, not as hard minimum level triggers.
-- Consider configured `file_risk` when explaining risk: small edits in database/auth/scheduler/API files can require heavier workflow than similar-sized UI text edits.
-- Distinguish inherent file risk from effective change risk. If the model classifies a high-risk file change as comment-only or docs-only, record that as intent and require later diff verification.
-- After implementation, run `change-assess --verify-diff <run_id>` before final handoff. Verification diffs against HEAD (staged changes included) and scans untracked files, so staging or leaving files untracked does not hide them. If it reports blocked, stop and present the blocking diff evidence.
-- Technical-plan approval is blocked while hard-guardrail analysis modules (such as business_rule_confirmation or threat_analysis) are unfinished; complete them with `change-assess --complete-step` and an artifact before `--approve-technical-plan`.
-- Treat `investigation-questions.yaml` as the bridge from Python UNKNOWNs to Agent investigation. After workflow approval, run `change-assess --next <run_id>`; if it recommends `answer_investigation_question`, produce the expected artifact with FACT/INFERENCE/UNKNOWN evidence before technical planning.
-- After implementation, run `change-assess --reassess <run_id>` and `change-assess --generate-verification-report <run_id>` before final handoff.
-- Stop after `workflow-plan.md` until human approval is present.
-- For `analysis_only` or `decision_support`, run `change-assess --generate-analysis-report <run_id>` and stop after presenting the analysis report unless the user opens a new implementation request.
-- You MUST NOT generate a technical plan before workflow approval.
-- You MUST NOT modify business code before technical-plan approval and a passing implementation gate check.
+Treat user input as a request, not as code fact. Before assessment, write a YAML
+intent file containing:
 
-Use command-line review and approval. Do not ask users to manually edit `human-review.yaml`; it is an audit file.
-When showing workflow review, include the Chinese progress status bar so the user can see 未执行 / 执行中 / 已执行 and elapsed time per completed step.
-Use `change-assess --status <run_id>` for a consolidated dashboard of current gate, artifacts, blockers, and next commands.
-Use `change-assess --next <run_id>` to determine the next action. Use `--execute-next` only when the command reports no user confirmation is required.
-When a subagent completes a generated task, run that task's `completion_command` or call `change-assess --complete-step <run_id> --module <module> --artifact <artifact> --agent <agent>` so the status bar records completed state, elapsed time, and artifact path.
-If `.ai-governance/artifact-schemas.yaml` defines required fields for that module, artifact validation must pass before claiming the step is complete.
-For strict schemas, evidence must be a list of mappings with `path`, integer `line`, labeled `fact` (`FACT:`, `INFERENCE:`, `UNKNOWN:`, `WEAK SIGNAL:`, or `DECISION:`), and `confidence: high|medium|low`.
-Run artifacts in `.ai-governance/runs/` are local audit and gate-state files; keep them gitignored by default. Use `change-assess --cleanup-runs --cleanup-dry-run` before deleting old runs.
+- `change_kind`, `change_nature`, `summary`, `confidence`, `scope.included`,
+  `scope.excluded`, `scope.unknowns`, `risk_hints`.
+- `request_goal.type`: `implementation` | `analysis_only` | `decision_support` |
+  `planning_only`. Classify before scoring. Analysis and decision-support requests
+  stop at their own gate and must not be pushed toward implementation just because
+  the wording mentions delete, database, API, or permission terms.
+- `relevant_files`: `[{path, reason}]`. **Do the localization the keyword scanner
+  cannot** — read the repository and find the files this request actually touches.
+  Keyword search fails across a natural-language/code gap (a Chinese request against
+  English code). Your `relevant_files` are what let code signals, file risk, and
+  reference fan-out run on the real code. Only list paths that exist.
+- `domain_hints`: `[{domain, confidence: high|medium|low, reason, anchors: [{path, line}]}]`.
+  Judge risk from what the located code *does*. Use domains the guardrails know:
+  `financial-calculation`, `physical-device-control`, `authentication`,
+  `authorization`, `public-interface`, `message-contract`, `database-schema`.
+  Use `confidence: high` only when code evidence is clear — high fires a hard
+  guardrail, lower confidence stays a candidate for confirmation. Hints are
+  additive: they raise risk, never suppress a keyword or code-signal domain.
+
+Lightweight routing depends entirely on you: there is no keyword fallback. A
+copy/menu/comment change is routed lightweight only when the intent declares a
+low-risk `change_kind` (`copy_change`, `menu_label_change`, `ui_text_change`,
+`documentation_change`, `comment_change`) or `change_nature` (`comment_only`,
+`documentation_only`, `display_text_only`, `metadata_only`) **and** sets every risk
+hint false. Otherwise a trivial edit scores heavier — the system errs strict rather
+than guessing from wording. Declare it only when true; `--verify-diff` checks the
+diff against the claim.
+
+## 3. Judgment rules
+
+- Analyze current repository state before scoring risk; apply hard guardrails before
+  composing the workflow.
+- Weak-only guardrail signals are candidates for confirmation, not hard minimum-level
+  triggers.
+- Consider configured `file_risk`: a small edit in a database/auth/scheduler/API file
+  can need a heavier workflow than a similar-sized UI text edit.
+- Distinguish inherent file risk from effective change risk. If a high-risk file is
+  changed comment-only, record that as intent and let diff verification confirm it.
+- Treat `investigation-questions.yaml` as the bridge from Python UNKNOWNs to agent
+  investigation. After workflow approval run `change-assess --next <run_id>`; if it
+  recommends `answer_investigation_question`, produce the artifact with
+  FACT/INFERENCE/UNKNOWN evidence before technical planning.
+
+## 4. Operating manual
+
+Flow: assess → workflow approval → technical plan → plan approval → implement →
+verify diff → reassess → verification report.
+
+- Use CLI review and approval. Never ask users to hand-edit `human-review.yaml`; it
+  is an audit file.
+- When showing workflow review, include the Chinese progress bar so the user sees
+  未执行 / 执行中 / 已执行 and elapsed time per step.
+- `--status` gives a dashboard of gate, artifacts, blockers, next commands.
+  `--next` gives the next action; use `--execute-next` only when it reports no user
+  confirmation is required.
+- Technical-plan approval stays blocked while hard-guardrail analysis modules (e.g.
+  `business_rule_confirmation`, `threat_analysis`) are unfinished. Complete them with
+  `--complete-step` plus an artifact first.
+- When a subagent finishes, run its `completion_command` or `--complete-step ... --module <m> --artifact <a> --agent <name>`
+  so the status bar records state, elapsed time, and artifact path. If
+  `.ai-governance/artifact-schemas.yaml` defines required fields, artifact validation
+  must pass before claiming the step complete. For strict schemas, evidence must be a
+  list of mappings with `path`, integer `line`, labeled `fact` (`FACT:`, `INFERENCE:`,
+  `UNKNOWN:`, `WEAK SIGNAL:`, `DECISION:`), and `confidence: high|medium|low`.
+- After implementation run `--verify-diff`, then `--reassess`, then
+  `--generate-verification-report` before final handoff. Verification diffs against
+  HEAD (staged included) and scans untracked files, so staging or leaving files
+  untracked hides nothing. If it reports blocked, stop and present the blocking diff.
+- For `analysis_only` / `decision_support`, run `--generate-analysis-report` and stop
+  after presenting it unless the user opens a new implementation request.
+- For L3/L4, split work via `agent-tasks.yaml`. Read-only and review-only subagents
+  must not modify files; implementation subagents require `GATE OK`.
+- Run artifacts in `.ai-governance/runs/` are local audit and gate-state files; keep
+  them gitignored by default. Use `--cleanup-runs --cleanup-dry-run` before deleting.
 
 ```bash
 change-assess --review-workflow <run_id>
@@ -80,5 +130,3 @@ change-assess --validate-artifact <run_id> --module dependency_analysis --artifa
 change-assess --complete-step <run_id> --module dependency_analysis --artifact dependency-analysis.yaml --agent dependency-analyzer
 change-assess --review-decision <run_id> --decision reassess --comment "reason"
 ```
-
-For L3/L4 workflows, use `agent-tasks.yaml` to split work into subagents. Read-only and review-only subagents must not modify files; implementation subagents require `GATE OK`.
