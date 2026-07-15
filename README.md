@@ -4,12 +4,9 @@ Reusable change governance and workflow routing for AI coding agents.
 
 ## Quick Start
 
-Adaptive Change Governance is a change-governance layer for AI coding agents. It assesses a requested change, writes audit artifacts, recommends the right workflow, and holds implementation until the required gates are approved.
+Adaptive Change Governance is a change-governance layer for AI coding agents. It assesses a requested change, writes audit artifacts, recommends the right workflow, and asks for human approval before design and implementation.
 
-Be precise about what "holds" means, because it decides how much you can rely on it:
-
-- **Locally it is collaboration discipline, not a sandbox.** The agent is the enforcement; the `PreToolUse` hook only raises the bypass cost. An agent with shell access can write around it, and the Codex CLI ships no hook at all. See [Enforcement boundary](#enforcement-boundary).
-- **Server-side it can be a real gate — but only once you configure it.** `--ci-gate` scores a pull request diff in CI. That is only a boundary if branch protection makes the check required *and* CODEOWNERS review protects the gate's own files; otherwise a pull request can rewrite the gate that judges it. See [Enforcement boundary](#enforcement-boundary).
+What it is: **process governance, an audit trail, and a pull-request risk review.** What it is not: a security sandbox. It lowers the chance an agent barrels into a risky change unreviewed; it does not make that physically impossible. See [How much it actually holds](#how-much-it-actually-holds).
 
 Install the Python dependency used by the CLI:
 
@@ -336,41 +333,53 @@ The plugin contributes a `change-assess` executable to Claude Code's Bash PATH. 
 
 The plugin also registers a `PreToolUse` hook (`hooks/implementation_gate.py`): while a governance run with an implementation goal has not passed `--check-gate --stage implementation`, `Edit`/`Write` tool calls on project files are denied, and gate-state files under `.ai-governance/runs/` (approval markers, `human-review.yaml`, verification reports) may only be written through the CLI. Set `ACG_HOOK_MODE=warn` to log instead of block, or `ACG_HOOK_MODE=off` to disable.
 
-## Enforcement boundary
+## How much it actually holds
 
-The local hook is a speed bump, not a security boundary. Do not present it as one:
+Two mechanisms, doing two different jobs. Neither is a sandbox, and it is worth being exact about which is which.
 
-- **It only matches editing tools** (`Edit|Write|MultiEdit|NotebookEdit`). A shell write is not intercepted — including a write to a gate-state file. `echo "" > .ai-governance/runs/<run>/.workflow-approved` forges a human approval, which defeats the premise of the gate rather than merely working around it.
+### Local hook — process discipline, not a boundary
+
+The hook keeps the everyday agent workflow honest: it stops an agent from skipping assessment, plan, and approval, and it catches careless edits. Treat it as a reminder with teeth, not a wall:
+
+- **It only matches editing tools** (`Edit|Write|MultiEdit|NotebookEdit`). A shell write is not intercepted — including a write to a gate-state file, so `echo "" > .ai-governance/runs/<run>/.workflow-approved` forges an approval.
 - **It can disable itself.** `ACG_HOOK_MODE=off` is an environment variable the agent can export.
-- **Codex has no hook at all.** `.codex-plugin/plugin.json` declares only `skills`; there, the SKILL is the whole gate and enforcement is self-discipline.
+- **Codex has no hook at all.** `.codex-plugin/plugin.json` declares only `skills`; there the SKILL is the whole gate.
 
-Widening the hook to `Bash` does not fix this: intercepting arbitrary shell (`>`, `tee`, `sed -i`, `python -c`, heredocs, generated scripts) is whack-a-mole, and an agent with shell access on the same machine cannot be constrained by local file gates — it could sign forged state with any key it can read.
+Widening it to `Bash` would not fix this: intercepting arbitrary shell (`>`, `tee`, `sed -i`, `python -c`, heredocs, generated scripts) is whack-a-mole, and an agent with shell access on the same machine cannot be constrained by local file gates anyway.
 
-Put enforcement where the agent cannot write:
+### CI gate — a pull-request risk review
 
 ```bash
 change-assess --ci-gate origin/main --ci-fail-level L3 --ci-output gate-summary.md
 ```
 
-`--ci-gate` scores the diff against a base ref **from code facts only** — no request text and no intent file, so nothing in the working tree can talk the verdict down. Domains come from `code_signals` on the changed code, destructive operations from statements the diff *adds*, blast radius from `reference_scanner`, plus configured `file_risk`. It exits `3` when the level reaches `--ci-fail-level` (default `L3`), meaning *a human must review this*, not *this change is wrong*.
+`--ci-gate` re-scores the diff against a base ref **from code facts only** — no request text and no intent file, so nothing in the working tree talks the verdict down. Domains come from `code_signals` on the changed code, destructive operations from statements the diff *adds*, blast radius from `reference_scanner`, plus configured `file_risk`. It exits `3` when the level reaches `--ci-fail-level` (default `L3`), meaning *a human should review this*, not *this change is wrong*.
 
-`.github/workflows/change-governance.yml` runs it on every pull request.
+Its job is to catch what the local flow missed: even if the agent skipped every local step, the pull request still gets one uniform, visible, auditable verdict before merge. `.github/workflows/change-governance.yml` runs it on every pull request.
 
-### The gate cannot protect itself
+### The ladder
 
-For `pull_request`, GitHub runs the workflow definition **from the pull request**. So the workflow is not its own trust anchor: a change can edit the gate that judges it. Two layers narrow that, and one setting closes it:
+Adopt as much as you need; each step is optional and independently useful:
 
-1. **The gate runs from the base revision.** The workflow checks the tool out at `github.event.pull_request.base.sha` and runs *that* code, with the base revision's rules passed as absolute paths, against the pull request's tree. (Absolute matters: given a relative path, `change-assess` prefers the project's own `.ai-governance/`, which would hand the rules back to the pull request.) Rewriting `ci_gate.py` or `guardrails.yaml` inside a pull request therefore does not change how that pull request is scored.
-2. **Touching the gate always requires review.** The base-revision gate forces `review_required` for any diff touching `GOVERNANCE_PATHS` (workflows, `bin/change-assess`, `lib/adaptive_change_governance/**`, `plugins/**`, `.ai-governance/**`, CODEOWNERS) regardless of the computed level.
-3. **You must enable the anchor.** The remaining hole is the workflow file itself, which layers 1 and 2 live in. Closing it needs repository settings an agent cannot edit:
-   - mark `governance-gate` a **required status check** on protected branches;
-   - enable **Require review from Code Owners**, with `.github/CODEOWNERS` (shipped, with `@OWNER` to replace) covering the governance paths.
+1. **Local hook** — lowers the chance an agent edits around the process.
+2. **CI gate** — gives every pull request a consistent, auditable risk verdict. *Advisory on its own.*
+3. **Required status check** — mark `governance-gate` required in branch protection. This is the step that makes the verdict affect merging. Until you do it, step 2 is a comment, not a gate.
 
-**Until you configure (3), this workflow is advisory, not a boundary.** Do not describe it as one.
+   The check is built to be **clearable**, which is what makes step 3 usable: GitHub does not let a review approval override a failing required check, so a gate that merely failed on high risk would make every L3/L4 pull request unmergeable forever. Instead, when the gate reports `review_required`, the workflow queries the pull request's reviews and passes once a human *other than the author* has approved. It also triggers on `pull_request_review`, because GitHub does not re-run `pull_request` workflows when a review lands — without that the check would never clear. Net effect: low-risk pull requests merge without ceremony; high-risk ones wait for a human.
+4. **CODEOWNERS** — only if you need to defend against a stronger threat: a pull request editing the gate, rules, or workflow so the gate passes itself. Not needed for a first rollout.
 
-The check is designed to be **clearable**, which matters: GitHub does not let a review approval override a failing required check, so a gate that merely failed on high risk would make every L3/L4 pull request unmergeable forever. Instead, when the gate reports `review_required`, the workflow queries the pull request's reviews and passes once a human *other than the author* has submitted an approving review. It also triggers on `pull_request_review`, because GitHub does not re-run `pull_request` workflows when a review lands — without that, the check would never clear.
+Steps 1–3 cover the ordinary case: process governance, audit trail, and a merge-time risk review.
 
-Net effect: low-risk pull requests merge without ceremony; high-risk ones need a human approval, which is the one signal an agent cannot forge.
+### If you take step 4
+
+For `pull_request`, GitHub runs the workflow definition **from the pull request**, so the workflow cannot be its own trust anchor. Two layers already ship (they cost you nothing and need no configuration):
+
+- The workflow checks the tool out at `github.event.pull_request.base.sha` and runs *that* code, with the base revision's rules passed as absolute paths, against the pull request's tree. (Absolute matters: given a relative path, `change-assess` prefers the project's own `.ai-governance/`, which would hand the rules back to the pull request.) Rewriting `ci_gate.py` or `guardrails.yaml` inside a pull request does not change how that pull request is scored.
+- That base-revision gate forces `review_required` for any diff touching `GOVERNANCE_PATHS` (workflows, `bin/change-assess`, `lib/adaptive_change_governance/**`, `plugins/**`, `.ai-governance/**`, CODEOWNERS), whatever the computed level.
+
+The remaining hole is the workflow file itself, which those two layers live in. Only a repository setting closes it: enable **Require review from Code Owners** with `.github/CODEOWNERS` (shipped; replace `@OWNER`) covering the governance paths.
+
+Known artifact: run against this repository, the gate flags `financial-calculation` and `physical-device-control`, because its own test fixtures and pattern definitions literally contain `power_off(...)` and `round(price * qty, 2)`. That is self-reference, not a finding on a normal target repository.
 
 Known artifact: run against this repository, the gate flags `financial-calculation` and `physical-device-control`, because its own test fixtures and pattern definitions literally contain `power_off(...)` and `round(price * qty, 2)`. That is self-reference, not a finding on a normal target repository.
 

@@ -226,12 +226,13 @@ Implemented after the initial spec:
 
 ## Enforcement Boundary
 
-Stated plainly, because the rest of this document describes gates and it would be easy to read them as binding:
+Stated plainly, because the rest of this document describes gates and it would be easy to read them as binding. This project is process governance, an audit trail, and a merge-time risk review — not a security sandbox.
 
-- **Local gates are collaboration discipline, not a security boundary.** The `PreToolUse` hook matches only `Edit|Write|MultiEdit|NotebookEdit`. A shell write bypasses it — including a write to a protected gate-state file, so `echo "" > .ai-governance/runs/<run>/.workflow-approved` forges a human approval. The hook is also self-disabling via `ACG_HOOK_MODE=off`.
+- **The local hook is process discipline, not a boundary.** It keeps the everyday agent flow from skipping assessment/plan/approval. It matches only `Edit|Write|MultiEdit|NotebookEdit`, so a shell write bypasses it — including a write to a protected gate-state file, making `echo "" > .ai-governance/runs/<run>/.workflow-approved` an approval forgery. It is also self-disabling via `ACG_HOOK_MODE=off`.
 - **Codex has no hook.** `.codex-plugin/plugin.json` declares only `skills`; the SKILL's MUST rules are the entire gate.
 - **Widening the hook to `Bash` is not a fix.** Parsing arbitrary shell is whack-a-mole, and an agent with shell access on the same host cannot be constrained by local file gates (any signing key it can read, it can use).
-- **Therefore real enforcement is server-side**: `--ci-gate` in CI, made binding by a required status check and required human review. A GitHub review approval is the one signal an agent cannot forge.
+- **The CI gate is a pull-request risk review.** `--ci-gate` re-scores the diff server-side from code facts, catching changes that skipped the local flow. **On its own it is advisory**: it only affects merging once `governance-gate` is a required status check in branch protection.
+- **Defending the gate from the change it is judging is a separate, later step.** The workflow already runs the tool from the base revision and forces review for diffs touching `GOVERNANCE_PATHS`, but for `pull_request` GitHub uses the workflow definition from the pull request, so the anchor must be a repository setting: Require review from Code Owners over `.github/CODEOWNERS`. Not required for a first rollout.
 - **Approval identity is lightweight.** `human_review.py` records `reviewer: human_cli_approval` when no reviewer is supplied — a constant string, with no identity, timestamp provenance, or signature. Adequate for local governance; not adequate for an audited, team-level process.
 
 ## Known Non-Goals Still Respected
