@@ -31,6 +31,9 @@ Required behavior:
 
 - Treat user input as request, not code fact.
 - Before running assessment, infer structured intent into a YAML file with change_kind, request_goal, included scope, excluded scope, unknowns, and risk_hints.
+- Do the localization the keyword scanner cannot: read the repository, find the files/symbols this request actually touches, and record them as `relevant_files` (a list of `{path, reason}`). Keyword search fails across a natural-language/code gap (e.g. a Chinese request against English code); your `relevant_files` are what let code signals, file risk, and reference fan-out run on the real code. Only list paths that exist.
+- Judge risk from what that located code does, then record `domain_hints`: a list of `{domain, confidence: high|medium|low, reason, anchors: [{path, line}]}`. Use domains the guardrails recognize (for example `financial-calculation`, `physical-device-control`, `authentication`, `authorization`, `public-interface`, `message-contract`, `database-schema`). Mark `confidence: high` only when the code evidence is clear; high-confidence hints can fire a hard guardrail, lower confidence stays a candidate for confirmation.
+- `domain_hints` are additive: they raise risk but never suppress a domain found by keywords or code signals, and they never lower a hard guardrail (spec 3.3). Do not omit a domain to avoid a gate — use the human review gate to downgrade, not the intent file.
 - Classify `request_goal.type` as `implementation`, `analysis_only`, `decision_support`, or `planning_only` before risk scoring. Analysis-only and decision-support requests stop at their analysis/decision gate and must not be pushed into implementation steps merely because the wording mentions delete, database, API, or permission terms.
 - Do not let keyword matches override clear low-risk user intent unless code evidence is strong.
 - Analyze current repository state before scoring risk.

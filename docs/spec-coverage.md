@@ -69,6 +69,8 @@ Implemented by:
 
 - `RepositoryAnalyzer`
 - `file_risk.py`
+- `reference_scanner.py` (blast-radius fan-out)
+- `code_signals.py` (code-grounded behavior signals)
 - evidence output in `evidence-pack.yaml`
 
 Covered facts:
@@ -80,7 +82,11 @@ Covered facts:
 - file semantic role classification
 - investigation questions compiled from UNKNOWNs, weak guardrails, feature-boundary uncertainty, and sensitive change signals
 - test files
-- affected domains
+- affected domains (keyword/path/relation evidence plus code-signal grounding)
+- reference fan-out (`reference_findings`): inbound reference count, referencing files/modules, shared-contract and cross-module-boundary flags — so a one-line edit to a widely referenced symbol reads as high blast radius
+- code signals (`code_signals`): deterministic behavior signals the keyword dictionary misses — money arithmetic, device-protocol calls (`power_off`), route/auth decorators, message publish/consume — emitted as strong domain evidence
+- host-model localization (`intent.relevant_files`): files the model identifies by reading the code are merged into scope, so code signals / file risk / reference fan-out run even when keyword search cannot bridge a natural-language/code gap
+- host-model domain judgments (`intent.domain_hints`): confidence-graded, additive domain evidence (high → strong / can fire a guardrail; lower → weak candidate); never removes a keyword or code-signal domain
 - change types
 - operations
 - file risk profile with configured rules plus semantic role inference
@@ -88,10 +94,10 @@ Covered facts:
 
 Remaining gaps:
 
-- Dependency analysis is keyword/path based, not a full AST or call graph.
+- Reference fan-out uses import/textual matches, not a resolved AST call graph; reflection and dynamic dispatch are still not counted.
 - Framework route discovery and dynamic invocation remain UNKNOWN when not directly visible.
-- Cross-service dependency discovery is heuristic.
-- Host-model intent can still improve include/exclude boundaries for natural-language negation and product-specific terms.
+- Cross-service (out-of-repo) consumers are not visible to the static scan and remain a host-model / reassessment concern.
+- Request-text keywords are deliberately kept as a conservative escalation floor, not demoted to localization-only. With host-model localization now bridging the language gap, false negatives are covered by `relevant_files` + `domain_hints`; the request keywords are retained because letting model presence suppress a keyword-triggered guardrail would violate spec 3.3 (model may add risk, never remove it). Over-triggering is resolved at the human review gate, not by the model.
 
 ### Phase 3: Risk Scoring
 

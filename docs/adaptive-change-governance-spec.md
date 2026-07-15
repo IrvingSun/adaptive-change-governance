@@ -418,6 +418,18 @@ hard_guardrails:
 hard_guardrails > AI建议 > 默认流程
 ```
 
+### 配置命名说明（基线 vs 领域画像）
+
+本节示例（`money-change`、`device-control`）以充电业务语义书写，实际实现将它们拆成两层：
+
+- **基线配置** `.ai-governance/guardrails.yaml` 使用与业务无关的通用名：
+  - `money-change` → `financial-calculation-change`（域 `financial-calculation`）
+  - `device-control` → `physical-device-control`（域 `physical-device-control`）
+  - 另新增 `governance-bypass`：当变更触及围栏执行、流程门禁或审批状态本身时强制独立/对抗审查，防止绕过治理。
+- **领域画像** `.ai-governance/profiles/charging-platform/` 保留业务名（`money-change`、`device-control`）并扩展触发域（billing/refund/settlement、device-command/charging-control 等）。
+
+两套名称语义与最低等级一致：§23 验收用例的围栏名对应 charging-platform profile；基线回归 `risk-scenarios.yaml` 断言的是等价的通用名（如 `financial-calculation-change`、`physical-device-control`）。§12.3 的 `level_overrides` 同样按此对应关系读取。
+
 ---
 
 # 10. 流程模块定义

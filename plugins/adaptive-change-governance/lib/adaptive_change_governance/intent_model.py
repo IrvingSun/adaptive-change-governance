@@ -74,6 +74,8 @@ def normalize_intent(intent: dict[str, Any] | None) -> dict[str, Any]:
             for key in RISKY_INTENT_FIELDS
         },
         "request_goal": request_goal,
+        "relevant_files": _relevant_files(intent.get("relevant_files")),
+        "domain_hints": _domain_hints(intent.get("domain_hints")),
         "notes": _string_list(intent.get("notes")),
     }
     return normalized
@@ -112,6 +114,60 @@ def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item) for item in value if str(item).strip()]
+
+
+CONFIDENCE_LEVELS = {"high", "medium", "low"}
+
+
+def _relevant_files(value: Any) -> list[dict[str, str]]:
+    """Host-model localization: files the model identified as actually changed."""
+    items = value if isinstance(value, list) else []
+    result = []
+    for item in items:
+        if isinstance(item, dict) and str(item.get("path", "")).strip():
+            result.append({
+                "path": str(item["path"]).strip(),
+                "reason": str(item.get("reason", "") or "host model identified as relevant"),
+            })
+        elif isinstance(item, str) and item.strip():
+            result.append({"path": item.strip(), "reason": "host model identified as relevant"})
+    return result
+
+
+def _domain_hints(value: Any) -> list[dict[str, Any]]:
+    """Host-model semantic domain judgments. Additive evidence only; a hint may
+    raise risk but never suppresses a keyword/code-signal domain (spec 3.3)."""
+    items = value if isinstance(value, list) else []
+    result = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        domain = str(item.get("domain", "") or "").strip()
+        if not domain:
+            continue
+        confidence = str(item.get("confidence", "medium") or "medium").strip().lower()
+        if confidence not in CONFIDENCE_LEVELS:
+            confidence = "medium"
+        result.append({
+            "domain": domain,
+            "confidence": confidence,
+            "reason": str(item.get("reason", "") or ""),
+            "anchors": _anchor_list(item.get("anchors")),
+        })
+    return result
+
+
+def _anchor_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result = []
+    for item in value:
+        if isinstance(item, dict) and str(item.get("path", "")).strip():
+            line = item.get("line")
+            result.append(f"{item['path']}:{line}" if line is not None else str(item["path"]).strip())
+        elif isinstance(item, str) and item.strip():
+            result.append(item.strip())
+    return result
 
 
 def _normalize_request_goal(value: Any, intent: dict[str, Any]) -> dict[str, Any]:

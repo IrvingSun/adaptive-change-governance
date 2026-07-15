@@ -7,8 +7,26 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .code_signals import scan_code_signals
 from .file_risk import evaluate_file_risk
 from .intent_model import infer_request_goal_from_text, is_low_risk_intent
+from .reference_scanner import scan_references
+
+
+def _keyword_hit(text_lower: str, word: str) -> bool:
+    """Match a keyword against lowered text.
+
+    ASCII keywords use word boundaries so 'api' no longer matches inside
+    'therapist'; CJK keywords keep substring matching (no word boundaries).
+    """
+    lowered = word.lower()
+    if lowered.isascii():
+        return re.search(r"\b" + re.escape(lowered) + r"\b", text_lower) is not None
+    return lowered in text_lower
+
+
+def _empty_code_signals() -> dict[str, list]:
+    return {"signals": [], "domains": [], "domain_evidence": []}
 
 
 DOMAIN_KEYWORDS = {
@@ -69,14 +87,18 @@ class RepositoryAnalyzer:
 
     def analyze(self, request: str, project_risk: dict[str, Any], intent: dict[str, Any] | None = None) -> dict[str, Any]:
         files = self._repository_files()
+        intent = intent or {}
         domain_keywords = self._merged_domain_keywords(project_risk)
-        direct_files = self._find_relevant_files(request, files)
+        # Localization: keyword search finds candidate files; the host model's
+        # relevant_files bridge the natural-language/code gap keyword search can't
+        # (e.g. a Chinese request against English code). Merged, they feed code
+        # signals, file risk, and reference fan-out.
+        direct_files = self._merge_model_files(self._find_relevant_files(request, files), intent, files)
         tests = self._find_tests(files)
         git_info = self._git_info()
         request_domains = self._match_keywords(request, domain_keywords)
         request_domain_evidence = self._keyword_evidence(request, domain_keywords, "user_request")
         file_domains = self._domains_from_paths(direct_files, domain_keywords)
-        intent = intent or {}
         request_goal = intent.get("request_goal") or infer_request_goal_from_text(request)
         text_only_change = is_low_risk_intent(intent) or self._is_text_only_change(request)
         change_types = sorted(set(self._match_keywords(request, CHANGE_TYPE_KEYWORDS) + self._change_types_from_paths(direct_files)))
@@ -84,6 +106,12 @@ class RepositoryAnalyzer:
             change_types = self._text_only_change_types(change_types)
         change_type_evidence = self._keyword_evidence(request, CHANGE_TYPE_KEYWORDS, "user_request")
         operations, operation_evidence = self._operation_findings(request, direct_files, text_only_change)
+        # Code signals are the code-grounded domain floor (money arithmetic,
+        # device protocol, route/auth decorators, message pub/sub). Skip them for
+        # display-text-only changes: coarse localization can pull an unrelated file
+        # into scope, and scoring its behavior would over-escalate a copy edit.
+        # Destructive operations keep their relation-aware grading below.
+        code_signals = scan_code_signals(self.root, [item["path"] for item in direct_files]) if not text_only_change else _empty_code_signals()
         database_changes = "database_schema" in change_types or bool({"delete", "truncate", "irreversible_migration", "bulk_update"} & set(operations))
         public_api_changes = "public_api" in change_types
         message_schema_changes = "message_schema" in change_types
@@ -92,8 +120,15 @@ class RepositoryAnalyzer:
         feature_boundary = self._feature_boundary(request, direct_files, related_files, text_only_change)
         unknowns.extend(feature_boundary.get("unknowns", []))
 
-        affected_domains = sorted(set(request_domains + file_domains))
+        hint_domains = [hint["domain"] for hint in intent.get("domain_hints", [])]
+        hint_domain_evidence = self._domain_hint_evidence(intent)
+        affected_domains = sorted(set(request_domains + file_domains + code_signals["domains"] + hint_domains))
         affected_modules = sorted({Path(item["path"]).parts[0] for item in direct_files + related_files if Path(item["path"]).parts})
+        reference_findings = scan_references(
+            self.root,
+            [item["path"] for item in direct_files],
+            [path.relative_to(self.root).as_posix() for path in files],
+        )
         file_risk_intent = dict(intent)
         if text_only_change and not file_risk_intent.get("change_nature"):
             file_risk_intent["change_nature"] = "display_text_only"
@@ -120,9 +155,11 @@ class RepositoryAnalyzer:
                 "related_files": related_files,
                 "affected_modules": affected_modules,
                 "affected_domains": affected_domains,
+                "reference_findings": reference_findings,
+                "code_signals": code_signals["signals"],
                 "change_types": change_types,
                 "operations": operations,
-                "domain_evidence": request_domain_evidence + self._file_keyword_evidence(direct_files, domain_keywords, "affected_domain", request),
+                "domain_evidence": request_domain_evidence + self._file_keyword_evidence(direct_files, domain_keywords, "affected_domain", request) + code_signals["domain_evidence"] + hint_domain_evidence,
                 "change_type_evidence": change_type_evidence + self._file_keyword_evidence(direct_files, CHANGE_TYPE_KEYWORDS, "change_type", request),
                 "operation_evidence": operation_evidence,
                 "database_changes": database_changes,
@@ -182,6 +219,41 @@ class RepositoryAnalyzer:
             if score:
                 findings.append({"path": rel, "reason": f"FACT: matched {score} request token(s) in path or content"})
         return findings[:50]
+
+    def _merge_model_files(self, direct_files: list[dict[str, str]], intent: dict[str, Any], files: list[Path]) -> list[dict[str, str]]:
+        existing = {item["path"] for item in direct_files}
+        repo_paths = {path.relative_to(self.root).as_posix() for path in files}
+        merged = list(direct_files)
+        for item in intent.get("relevant_files", []):
+            path = str(item.get("path", "")).strip()
+            # Only trust model localization that points at a file actually present
+            # in the repository; phantom paths are ignored, not invented into scope.
+            if not path or path in existing or path not in repo_paths:
+                continue
+            reason = str(item.get("reason", "") or "")[:120]
+            merged.append({"path": path, "reason": f"FACT: host model localized this file as relevant. {reason}".strip()})
+            existing.add(path)
+        return merged
+
+    def _domain_hint_evidence(self, intent: dict[str, Any]) -> list[dict[str, str]]:
+        # Model domain judgments are additive: high confidence becomes strong
+        # evidence that can fire a guardrail; lower confidence is a weak candidate
+        # for confirmation. Hints never remove keyword or code-signal domains.
+        evidence = []
+        for hint in intent.get("domain_hints", []):
+            strength = "strong" if hint.get("confidence") == "high" else "weak"
+            prefix = "FACT" if strength == "strong" else "WEAK SIGNAL"
+            anchors = ", ".join(hint.get("anchors", [])[:5])
+            location = f" at {anchors}" if anchors else ""
+            reason = str(hint.get("reason", "") or "")[:160]
+            evidence.append({
+                "value": hint["domain"],
+                "source": "model_intent",
+                "keyword": "domain_hint",
+                "strength": strength,
+                "fact": f"{prefix}: host model classified affected_domain {hint['domain']} (confidence={hint.get('confidence')}){location}. {reason}".strip(),
+            })
+        return evidence
 
     def _related_files(self, direct_files: list[dict[str, str]], files: list[Path]) -> list[dict[str, str]]:
         stems = {Path(item["path"]).stem.lower() for item in direct_files}
@@ -435,20 +507,24 @@ class RepositoryAnalyzer:
 
     def _match_keywords(self, text: str, mapping: dict[str, list[str]]) -> list[str]:
         lower = text.lower()
-        return sorted([key for key, words in mapping.items() if any(word.lower() in lower for word in words)])
+        return sorted([key for key, words in mapping.items() if any(_keyword_hit(lower, word) for word in words)])
 
-    def _keyword_evidence(self, text: str, mapping: dict[str, list[str]], source: str) -> list[dict[str, str]]:
+    def _keyword_evidence(self, text: str, mapping: dict[str, list[str]], source: str, strength: str = "strong") -> list[dict[str, str]]:
+        # Request-text keywords are a localization signal, not a risk verdict, so
+        # domain matches from the request are recorded as weak candidates. Strong,
+        # risk-driving domain evidence comes from code signals and file facts.
         lower = text.lower()
+        prefix = "FACT" if strength == "strong" else "WEAK SIGNAL"
         evidence = []
         for key, words in mapping.items():
             for word in words:
-                if word.lower() in lower:
+                if _keyword_hit(lower, word):
                     evidence.append({
                         "value": key,
                         "source": source,
                         "keyword": word,
-                        "strength": "strong",
-                        "fact": f"FACT: {source} contains keyword '{word}' mapped to {key}.",
+                        "strength": strength,
+                        "fact": f"{prefix}: {source} contains keyword '{word}' mapped to {key}.",
                     })
                     break
         return evidence
@@ -577,7 +653,7 @@ class RepositoryAnalyzer:
             matched_request_tokens = [token for token in request_tokens if token in haystack]
             for value, words in mapping.items():
                 for word in words:
-                    if word.lower() in haystack:
+                    if _keyword_hit(haystack, word):
                         relation = self._keyword_relation_context(finding["path"], haystack, word, relation_tokens)
                         strength = "strong" if relation["strong"] else "weak"
                         prefix = "FACT" if strength == "strong" else "WEAK SIGNAL"

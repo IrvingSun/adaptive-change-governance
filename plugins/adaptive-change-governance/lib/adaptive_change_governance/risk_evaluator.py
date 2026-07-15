@@ -405,7 +405,37 @@ class RiskEvaluator:
             dimensions["production_impact"] = max(dimensions["production_impact"], 4)
         if ambiguous_important_files:
             dimensions["change_scope"] = max(dimensions["change_scope"], min(5, 2 + ambiguous_important_files))
+        self._apply_blast_radius(dimensions, code, doc_only or text_only)
         return {key: min(5, max(1, value)) for key, value in dimensions.items()}
+
+    def _apply_blast_radius(self, dimensions: dict[str, int], code: dict[str, Any], display_only: bool) -> None:
+        # Blast radius is a code-grounded fact: a tiny edit to a widely referenced
+        # symbol is high risk. Reference fan-out drives change_scope and makes
+        # dependency_coupling change-specific instead of a flat project constant.
+        # It may only raise risk (monotonic), never lower a guardrail.
+        reference = code.get("reference_findings", {})
+        if not isinstance(reference, dict) or not reference.get("changed_symbols"):
+            return
+        inbound = int(reference.get("inbound_reference_count", 0) or 0)
+        modules = len(reference.get("referencing_modules", []) or [])
+        fan_out = self._fan_out_score(inbound, modules)
+        dimensions["dependency_coupling"] = fan_out
+        if not display_only:
+            dimensions["change_scope"] = max(dimensions["change_scope"], fan_out)
+        if reference.get("is_shared_contract") and not display_only:
+            dimensions["change_scope"] = max(dimensions["change_scope"], 4)
+            dimensions["production_impact"] = max(dimensions["production_impact"], 4)
+
+    def _fan_out_score(self, inbound: int, modules: int) -> int:
+        if inbound >= 200 or modules >= 5:
+            return 5
+        if inbound >= 50 or modules >= 3:
+            return 4
+        if inbound >= 10 or modules >= 2:
+            return 3
+        if inbound >= 1:
+            return 2
+        return 1
 
     def _has_security_domain(self, code: dict[str, Any]) -> bool:
         security = {"authentication", "authorization", "credential", "token"}

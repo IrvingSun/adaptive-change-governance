@@ -19,6 +19,7 @@ from .progress import ProgressTracker
 from .reassessment import ReassessmentRunner
 from .repository_analyzer import RepositoryAnalyzer
 from .risk_evaluator import RiskEvaluator, render_risk_markdown
+from .risk_config_suggester import RiskConfigSuggester
 from .risk_scenarios import RiskScenarioValidator
 from .run_status import RunStatusRenderer
 from .run_retention import cleanup_runs, render_cleanup_summary
@@ -46,6 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--status", help="Print a run status dashboard for an existing run id or run directory")
     parser.add_argument("--next", help="Print or safely execute the next recommended action for an existing run")
     parser.add_argument("--execute-next", action="store_true", help="Execute the next action only when it does not require user confirmation")
+    parser.add_argument("--continue", dest="continue_run", help="Auto-advance a run through every safe step, stopping at the next human gate or blocker")
     parser.add_argument("--approve-workflow", help="Approve workflow for an existing run id or run directory")
     parser.add_argument("--review-decision", help="Set review decision for an existing run id or run directory")
     parser.add_argument("--propose-technical-plan", help="Generate technical-plan.yaml/md after workflow approval")
@@ -61,6 +63,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--complete-step", help="Mark one workflow module as completed for an existing run id or run directory")
     parser.add_argument("--validate-artifact", help="Validate one module artifact for an existing run id or run directory")
     parser.add_argument("--validate-risk-scenarios", action="store_true", help="Validate configured risk scoring scenarios")
+    parser.add_argument("--suggest-risk-config", action="store_true", help="Write project-specific file_risk suggestions without modifying governance config")
+    parser.add_argument("--apply-risk-config", action="store_true", help="With --suggest-risk-config, apply the suggested project-risk.yaml after explicit confirmation")
     parser.add_argument("--check-gate", help="Check whether a run may enter a stage")
     parser.add_argument("--add-context", help="Add facts, corrections, or scope context to a run id or run directory")
     parser.add_argument("--cleanup-runs", action="store_true", help="Clean old .ai-governance/runs entries according to audit_retention policy")
@@ -121,6 +125,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.next:
         return _next(root, Path(args.output), args.next, args, project_risk, guardrails, workflow_modules, risk_calibration)
 
+    if args.continue_run:
+        return _continue(root, Path(args.output), args.continue_run, project_risk, guardrails, workflow_modules, risk_calibration)
+
     if args.review_decision:
         return _review_decision(root, Path(args.output), args.review_decision, args, workflow_modules)
 
@@ -168,6 +175,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.validate_risk_scenarios:
         return _validate_risk_scenarios(root, tool_root, args, project_risk, guardrails, risk_calibration)
+
+    if args.suggest_risk_config:
+        return _suggest_risk_config(root, project_risk, apply=args.apply_risk_config)
+
+    if args.apply_risk_config:
+        print("ERROR: --apply-risk-config must be used with --suggest-risk-config")
+        return 2
 
     if args.check_gate:
         return _check_gate(root, Path(args.output), args.check_gate, args, workflow_modules)
@@ -264,7 +278,13 @@ def _next(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, 
     if not plan.get("can_execute"):
         print("BLOCKED: next action cannot be executed automatically")
         return 3
-    action = plan.get("recommended_action")
+    action = plan.get("recommended_action", "none")
+    return _execute_auto_action(action, root, output_root, run_id, project_risk, guardrails, workflow_modules, risk_calibration)
+
+
+def _execute_auto_action(action: str, root: Path, output_root: Path, run_id: str, project_risk: dict, guardrails: dict, workflow_modules: dict, risk_calibration: dict | None = None) -> int:
+    """Run one auto-executable next action. Only actions that plan() marks
+    can_execute=True should reach here; approvals and blockers never do."""
     if action == "generate_analysis_report":
         return _generate_analysis_report(root, output_root, run_id, workflow_modules)
     if action == "generate_agent_tasks":
@@ -277,6 +297,41 @@ def _next(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, 
         return _generate_verification_report(root, output_root, run_id)
     print("BLOCKED: unsupported automatic next action")
     return 3
+
+
+def _continue(root: Path, output_root: Path, run_id: str, project_risk: dict, guardrails: dict, workflow_modules: dict, risk_calibration: dict | None = None) -> int:
+    """Auto-advance a run through every step plan() marks can_execute=True,
+    stopping at the next human gate (approval / investigation / blocker) or
+    completion. It never approves: approvals have can_execute=False, so the loop
+    stops before them and prints the human command to run next."""
+    run_dir = _resolve_run_dir(root, output_root, run_id)
+    if not run_dir.exists():
+        print(f"ERROR: run not found: {run_id}")
+        return 2
+    planner = NextActionPlanner()
+    max_steps = 25
+    executed = 0
+    for _ in range(max_steps):
+        plan = planner.plan(run_dir)
+        print(planner.render_operator_summary(planner.operator_summary(run_dir, plan=plan)), end="")
+        if not plan.get("can_execute"):
+            if plan.get("recommended_action") == "complete":
+                print(f"\nContinue finished: run is complete after {executed} automatic step(s).")
+                return 0
+            print(f"\nContinue stopped at gate: {plan.get('current_gate')} (after {executed} automatic step(s)).")
+            print("Next human action:")
+            print(f"  {plan.get('command') or 'none'}")
+            return 0
+        action = plan.get("recommended_action", "none")
+        print(f"\n==> Auto-executing: {action}\n")
+        code = _execute_auto_action(action, root, output_root, run_id, project_risk, guardrails, workflow_modules, risk_calibration)
+        if code != 0:
+            print(f"Continue stopped: step '{action}' returned exit code {code}.")
+            return code
+        executed += 1
+        print()
+    print(f"Continue stopped: reached the {max_steps}-step safety limit (state may not be advancing).")
+    return 0
 
 
 def _review_decision(root: Path, output_root: Path, run_id: str, args: argparse.Namespace, workflow_modules: dict) -> int:
@@ -465,6 +520,34 @@ def _validate_risk_scenarios(root: Path, tool_root: Path, args: argparse.Namespa
         for error in item.get("errors", []):
             print(f"  {error}")
     return 0 if report.get("status") == "pass" else 3
+
+
+def _suggest_risk_config(root: Path, project_risk: dict, apply: bool = False) -> int:
+    report = RiskConfigSuggester(root, project_risk).write(root / ".ai-governance")
+    summary = report.get("summary", {})
+    active_path = root / ".ai-governance/project-risk.yaml"
+    draft_path = root / ".ai-governance/project-risk.suggested.yaml"
+    print("Risk config suggestions written")
+    print(f"Scanned files: {summary.get('scanned_files')}")
+    print(f"New candidate file_risk rules: {summary.get('new_candidate_rules')}")
+    print(f"Report: {root / '.ai-governance/risk-config-suggestions.md'}")
+    print(f"Draft config: {draft_path}")
+    if not apply:
+        print("No governance config was modified.")
+        print("To apply after review, rerun with --suggest-risk-config --apply-risk-config.")
+        return 0
+    print("CONFIRMATION REQUIRED: applying will replace .ai-governance/project-risk.yaml with the suggested draft.")
+    try:
+        confirmation = input("Type APPLY to update project-risk.yaml: ").strip()
+    except EOFError:
+        print("ABORTED: confirmation input was not available.")
+        return 3
+    if confirmation != "APPLY":
+        print("ABORTED: confirmation did not match APPLY. No governance config was modified.")
+        return 3
+    active_path.write_bytes(draft_path.read_bytes())
+    print(f"Applied suggested risk config: {active_path}")
+    return 0
 
 
 def _reassess(root: Path, output_root: Path, run_id: str, project_risk: dict, guardrails: dict, workflow_modules: dict, risk_calibration: dict | None = None) -> int:

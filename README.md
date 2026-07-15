@@ -75,6 +75,18 @@ To customize project-specific risk behavior, edit:
 - `.ai-governance/workflow-modules.yaml` for which workflow steps each risk level requires.
 - `.ai-governance/profiles/<profile>/` for domain-specific overrides.
 
+To bootstrap file-risk rules for a new repository, write a suggestions-only report:
+
+```bash
+change-assess --suggest-risk-config
+```
+
+After reviewing `.ai-governance/project-risk.suggested.yaml`, apply it with an explicit confirmation prompt:
+
+```bash
+change-assess --suggest-risk-config --apply-risk-config
+```
+
 Phase 1 command:
 
 ```bash

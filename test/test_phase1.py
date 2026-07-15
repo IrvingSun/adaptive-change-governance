@@ -20,6 +20,7 @@ from adaptive_change_governance.context_adjuster import apply_user_context
 from adaptive_change_governance.diff_verifier import DiffVerifier
 from adaptive_change_governance.human_review import HumanReviewGate, ReviewError
 from adaptive_change_governance.intent_model import normalize_intent
+from adaptive_change_governance.reassessment import ReassessmentRunner
 from adaptive_change_governance.repository_analyzer import RepositoryAnalyzer
 from adaptive_change_governance.run_retention import cleanup_runs
 from adaptive_change_governance.risk_evaluator import RiskEvaluator
@@ -338,6 +339,22 @@ class Phase1Test(unittest.TestCase):
             self.assertEqual(next_action.returncode, 0, next_action.stderr + next_action.stdout)
             self.assertIn("Requires human confirmation: no", next_action.stdout)
             self.assertIn("Next action: generate_analysis_report", next_action.stdout)
+            continued = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--continue", run_dir.name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(continued.returncode, 0, continued.stderr + continued.stdout)
+            self.assertIn("Auto-executing: generate_analysis_report", continued.stdout)
+            self.assertIn("Continue finished: run is complete", continued.stdout)
+            self.assertTrue((run_dir / "analysis-report.yaml").exists())
+            self.assertTrue((run_dir / ".analysis-complete").exists())
+            (run_dir / "analysis-report.yaml").unlink()
+            (run_dir / "analysis-report.md").unlink()
+            (run_dir / ".analysis-complete").unlink()
             next_execute = subprocess.run(
                 [sys.executable, str(temp / "bin/change-assess"), "--next", run_dir.name, "--execute-next"],
                 cwd=temp,
@@ -404,6 +421,86 @@ class Phase1Test(unittest.TestCase):
             report = load_yaml(temp / ".ai-governance/risk-scenario-report.yaml")
             self.assertEqual("pass", report["status"])
             self.assertGreaterEqual(report["summary"]["passed"], 4)
+        finally:
+            shutil.rmtree(temp)
+
+    def test_suggest_risk_config_writes_suggestions_without_modifying_config(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            shutil.copytree(ROOT / ".ai-governance", temp / ".ai-governance", ignore=shutil.ignore_patterns("runs", "risk-*-report.*", "risk-config-suggestions.*"))
+            shutil.copytree(ROOT / "lib", temp / "lib")
+            shutil.copytree(ROOT / "bin", temp / "bin")
+            (temp / "app/api").mkdir(parents=True)
+            (temp / "app/api/auth.py").write_text("def login(): pass\n", encoding="utf-8")
+            (temp / "app/jobs").mkdir(parents=True)
+            (temp / "app/jobs/reconcile.py").write_text("def run(): pass\n", encoding="utf-8")
+            (temp / "sql").mkdir()
+            (temp / "sql/schema.sql").write_text("create table example(id int);\n", encoding="utf-8")
+            (temp / "frontend/src/views").mkdir(parents=True)
+            (temp / "frontend/src/views/Home.vue").write_text("<template>Home</template>\n", encoding="utf-8")
+            before = (temp / ".ai-governance/project-risk.yaml").read_bytes()
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(temp / "lib")
+            result = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--suggest-risk-config"],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("Risk config suggestions written", result.stdout)
+            self.assertIn("No governance config was modified", result.stdout)
+            self.assertIn("Draft config:", result.stdout)
+            self.assertIn("--suggest-risk-config --apply-risk-config", result.stdout)
+            self.assertEqual(before, (temp / ".ai-governance/project-risk.yaml").read_bytes())
+            report_path = temp / ".ai-governance/risk-config-suggestions.yaml"
+            self.assertTrue(report_path.exists())
+            self.assertTrue((temp / ".ai-governance/risk-config-suggestions.md").exists())
+            draft_path = temp / ".ai-governance/project-risk.suggested.yaml"
+            self.assertTrue(draft_path.exists())
+            report = load_yaml(report_path)
+            self.assertEqual("suggestions_only", report["status"])
+            self.assertEqual(".ai-governance/project-risk.suggested.yaml", report["draft_config"])
+            self.assertGreater(report["summary"]["scanned_files"], 0)
+            patterns = {item["pattern"]: item for item in report["all_candidates"]}
+            self.assertIn("**/*.sql", patterns)
+            self.assertIn("**/jobs/**", patterns)
+            self.assertIn("frontend/src/views/**", patterns)
+            self.assertTrue(patterns["**/*.sql"]["already_configured"])
+            self.assertFalse(patterns["**/jobs/**"]["already_configured"])
+            draft = load_yaml(draft_path)
+            draft_patterns = {item["pattern"] for item in draft["file_risk"]}
+            self.assertIn("**/jobs/**", draft_patterns)
+            self.assertIn("frontend/src/views/**", draft_patterns)
+            self.assertNotEqual(before, draft_path.read_bytes())
+
+            rejected = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--suggest-risk-config", "--apply-risk-config"],
+                cwd=temp,
+                env=env,
+                input="NO\n",
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(rejected.returncode, 3, rejected.stderr + rejected.stdout)
+            self.assertIn("ABORTED", rejected.stdout)
+            self.assertEqual(before, (temp / ".ai-governance/project-risk.yaml").read_bytes())
+
+            applied = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--suggest-risk-config", "--apply-risk-config"],
+                cwd=temp,
+                env=env,
+                input="APPLY\n",
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(applied.returncode, 0, applied.stderr + applied.stdout)
+            self.assertIn("Applied suggested risk config", applied.stdout)
+            self.assertEqual(draft_path.read_bytes(), (temp / ".ai-governance/project-risk.yaml").read_bytes())
         finally:
             shutil.rmtree(temp)
 
@@ -712,6 +809,22 @@ class Phase1Test(unittest.TestCase):
             )
             self.assertEqual(execute_next.returncode, 3, execute_next.stderr + execute_next.stdout)
             self.assertIn("requires user confirmation", execute_next.stdout)
+            continued = subprocess.run(
+                [sys.executable, str(temp / "bin/change-assess"), "--continue", runs[0].name],
+                cwd=temp,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(continued.returncode, 0, continued.stderr + continued.stdout)
+            self.assertIn("# Operator Summary", continued.stdout)
+            self.assertIn("Requires human confirmation: yes", continued.stdout)
+            self.assertIn("Continue stopped at gate: workflow_plan_approval", continued.stdout)
+            self.assertIn("change-assess --approve-workflow", continued.stdout)
+            self.assertFalse((runs[0] / ".workflow-approved").exists())
+            self.assertFalse((runs[0] / "approved-workflow.yaml").exists())
+            self.assertFalse((runs[0] / "technical-plan.yaml").exists())
             for artifact in ("evidence-pack.yaml", "risk-assessment.yaml", "risk-assessment.md", "investigation-questions.yaml", "investigation-questions.md", "workflow-plan.md"):
                 self.assertTrue((runs[0] / artifact).exists(), artifact)
             evidence = load_yaml(runs[0] / "evidence-pack.yaml")
@@ -1451,6 +1564,169 @@ class Phase1Test(unittest.TestCase):
                 yaml.safe_dump(review, handle, sort_keys=False, allow_unicode=True)
             with self.assertRaisesRegex(ReviewError, "cannot remove"):
                 gate.approve_workflow(temp, self.project_risk)
+        finally:
+            shutil.rmtree(temp)
+
+    def test_reassessment_escalates_when_rescan_reveals_higher_risk(self):
+        # spec §23 用例五：初判低风险，实现中重扫发现设备控制域 -> 升级并要求重新审批。
+        # 静态打分场景无法表达“初判 -> 重扫升级”这一动态过程，故以 ReassessmentRunner 单测覆盖。
+        temp = Path(tempfile.mkdtemp())
+        try:
+            root = temp / "repo"
+            (root / "device").mkdir(parents=True)
+            (root / "device" / "stop_command.py").write_text(
+                "def send_stop(port):\n    # 重试下发停止指令 / 断电控制指令\n    return device_protocol.power_off(port)\n",
+                encoding="utf-8",
+            )
+            request = "修改设备停止指令的断电重试逻辑。"
+            run_dir = root / ".ai-governance/runs/run-escalation"
+            run_dir.mkdir(parents=True)
+            # 初判事实包/风险：低风险、未识别设备控制域（模拟初判失真）。
+            dump_yaml(run_dir / "evidence-pack.yaml", {
+                "version": 1,
+                "request": {"original": request, "normalized_intent": request},
+                "code_findings": {
+                    "direct_files": [],
+                    "affected_modules": [],
+                    "affected_domains": [],
+                    "change_types": [],
+                },
+            })
+            dump_yaml(run_dir / "risk-assessment.yaml", {"final_level": "L1", "triggered_guardrails": []})
+            dump_yaml(run_dir / "workflow-recommendation.yaml", {
+                "workflow_recommendation": {"required_modules": ["code_fact_scan"]},
+            })
+
+            result = ReassessmentRunner(root, self.project_risk, self.guardrails, self.modules).run(run_dir)
+            reassessment = result["reassessment"]
+            self.assertEqual(reassessment["previous_level"], "L1")
+            self.assertEqual(reassessment["new_level"], "L3")
+            self.assertTrue(reassessment["requires_human_reapproval"])
+            self.assertIn("risk_level_increased", reassessment["reasons"])
+            self.assertIn("discovered_new_affected_domain", reassessment["reasons"])
+            self.assertIn(
+                "physical-device-control",
+                result["scope_diff"]["new_affected_domains"],
+            )
+        finally:
+            shutil.rmtree(temp)
+
+    def test_blast_radius_raises_scope_for_small_edit_to_widely_referenced_symbol(self):
+        # 小改动大扇出：一行改动动了被多模块引用的公共符号 -> change_scope/耦合升高。
+        temp = Path(tempfile.mkdtemp())
+        try:
+            (temp / "core").mkdir(parents=True)
+            (temp / "core" / "order_status.py").write_text(
+                "class OrderStatus:\n    CREATED = 1\n    PAID = 2\n", encoding="utf-8"
+            )
+            for module in ("order", "billing", "settlement", "notify"):
+                (temp / module).mkdir(parents=True)
+                for index in range(5):
+                    (temp / module / f"h{index}.py").write_text(
+                        "from core.order_status import OrderStatus\n\ndef f():\n    return OrderStatus.PAID\n",
+                        encoding="utf-8",
+                    )
+            evidence = RepositoryAnalyzer(temp).analyze("调整 OrderStatus 里 PAID 的取值", self.project_risk)
+            reference = evidence["code_findings"]["reference_findings"]
+            self.assertGreaterEqual(reference["inbound_reference_count"], 20)
+            self.assertTrue(reference["is_shared_contract"])
+            self.assertGreaterEqual(len(reference["referencing_modules"]), 3)
+            risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)
+            dims = {item["dimension"]: item["score"] for item in risk["risk_explanation"]["dimension_explanations"]}
+            self.assertGreaterEqual(dims["change_scope"], 4)
+            self.assertGreaterEqual(dims["dependency_coupling"], 4)
+        finally:
+            shutil.rmtree(temp)
+
+    def test_isolated_change_reads_low_dependency_coupling(self):
+        # dependency_coupling 不再是死的项目常量：孤立、无人引用的改动读到低耦合。
+        temp = Path(tempfile.mkdtemp())
+        try:
+            (temp / "tools").mkdir(parents=True)
+            (temp / "tools" / "lonely_helper.py").write_text(
+                "def lonely_helper():\n    return 42\n", encoding="utf-8"
+            )
+            evidence = RepositoryAnalyzer(temp).analyze("改 lonely_helper 的返回值", self.project_risk)
+            self.assertEqual(evidence["code_findings"]["reference_findings"]["inbound_reference_count"], 0)
+            risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)
+            dims = {item["dimension"]: item["score"] for item in risk["risk_explanation"]["dimension_explanations"]}
+            self.assertEqual(dims["dependency_coupling"], 1)
+        finally:
+            shutil.rmtree(temp)
+
+    def test_keyword_word_boundary_removes_api_substring_false_positive(self):
+        # 'api' 子串不再命中 'therapist'：字面误报被词边界消除。
+        temp = Path(tempfile.mkdtemp())
+        try:
+            evidence = RepositoryAnalyzer(temp).analyze("更新 therapist 预约页面的提示文案", self.project_risk)
+            self.assertNotIn("public-interface", evidence["code_findings"]["affected_domains"])
+        finally:
+            shutil.rmtree(temp)
+
+    def test_code_signal_grounds_money_domain_from_arithmetic(self):
+        # 域来自代码事实而非请求字面：请求无金额关键词，但代码在做金额算术。
+        temp = Path(tempfile.mkdtemp())
+        try:
+            (temp / "billing").mkdir(parents=True)
+            (temp / "billing" / "calc.py").write_text(
+                "def total(price, qty):\n    return round(price * qty, 2)\n", encoding="utf-8"
+            )
+            evidence = RepositoryAnalyzer(temp).analyze("调整 calc 里 total 的逻辑", self.project_risk)
+            self.assertIn("financial-calculation", evidence["code_findings"]["affected_domains"])
+            kinds = {signal["kind"] for signal in evidence["code_findings"]["code_signals"]}
+            self.assertIn("money_arithmetic", kinds)
+        finally:
+            shutil.rmtree(temp)
+
+    def test_code_signal_grounds_device_domain_from_power_off_call(self):
+        # power_off 调用是关键词字典漏掉的设备行为信号，由 code_signal 兜住。
+        temp = Path(tempfile.mkdtemp())
+        try:
+            (temp / "ctl").mkdir(parents=True)
+            (temp / "ctl" / "port_ctl.py").write_text(
+                "def stop(port):\n    return port_protocol.power_off(port)\n", encoding="utf-8"
+            )
+            evidence = RepositoryAnalyzer(temp).analyze("调整 port_ctl 里 stop 的逻辑", self.project_risk)
+            self.assertIn("physical-device-control", evidence["code_findings"]["affected_domains"])
+        finally:
+            shutil.rmtree(temp)
+
+    def test_model_localization_bridges_gap_when_keyword_search_misses(self):
+        # P3: 中文请求 + 英文代码，关键词定位失效；宿主模型 relevant_files 桥接后，
+        # code_signal 在模型定位到的代码上跑出金额域 -> 触发围栏。
+        temp = Path(tempfile.mkdtemp())
+        try:
+            (temp / "billing").mkdir(parents=True)
+            (temp / "billing" / "calc.py").write_text(
+                "def total(price, qty):\n    return round(price * qty, 2)\n", encoding="utf-8"
+            )
+            request = "优化一下这里的处理逻辑"
+            without_model = RepositoryAnalyzer(temp).analyze(request, self.project_risk, intent={})
+            self.assertNotIn("financial-calculation", without_model["code_findings"]["affected_domains"])
+
+            intent = normalize_intent({"relevant_files": [{"path": "billing/calc.py", "reason": "amount calc"}]})
+            with_model = RepositoryAnalyzer(temp).analyze(request, self.project_risk, intent=intent)
+            self.assertIn("financial-calculation", with_model["code_findings"]["affected_domains"])
+            risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(with_model)
+            self.assertIn("financial-calculation-change", risk["triggered_guardrails"])
+        finally:
+            shutil.rmtree(temp)
+
+    def test_domain_hint_confidence_gates_hard_trigger(self):
+        # P3: 高置信模型域判断是强证据可触发围栏；较低置信只作候选，不硬触发（单调只增）。
+        temp = Path(tempfile.mkdtemp())
+        try:
+            high = normalize_intent({"domain_hints": [{"domain": "physical-device-control", "confidence": "high", "reason": "stop command"}]})
+            high_risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(
+                RepositoryAnalyzer(temp).analyze("调整某逻辑", self.project_risk, intent=high)
+            )
+            self.assertIn("physical-device-control", high_risk["triggered_guardrails"])
+
+            medium = normalize_intent({"domain_hints": [{"domain": "physical-device-control", "confidence": "medium"}]})
+            medium_evidence = RepositoryAnalyzer(temp).analyze("调整某逻辑", self.project_risk, intent=medium)
+            medium_risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(medium_evidence)
+            self.assertIn("physical-device-control", medium_evidence["code_findings"]["affected_domains"])
+            self.assertNotIn("physical-device-control", medium_risk["triggered_guardrails"])
         finally:
             shutil.rmtree(temp)
 
