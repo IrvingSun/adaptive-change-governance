@@ -21,6 +21,32 @@ WEIGHTS = {
 }
 
 
+BAR_WIDTH = 12
+
+
+def _contribution(item: dict[str, Any]) -> float:
+    """A dimension's actual share of weighted_score. Raw scores are not comparable
+    across dimensions: score 4 on weight 0.9 moves the total less than score 3 on
+    weight 1.4."""
+    try:
+        return float(item.get("score", 0)) * float(item.get("weight", 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _bar(value: float, peak: float, width: int = BAR_WIDTH) -> str:
+    """Bar length is relative to the largest contribution, not to an absolute ceiling:
+    the question a reader has here is "what drove this level", not "how close to max"."""
+    if peak <= 0 or value <= 0:
+        return ""
+    filled = value / peak * width
+    full = int(filled)
+    bar = "█" * full
+    if filled - full >= 0.5 and full < width:
+        bar += "▌"
+    return bar or "▏"
+
+
 def render_risk_markdown(risk: dict[str, Any]) -> str:
     explanation = risk.get("risk_explanation", {})
     lines = [
@@ -32,13 +58,31 @@ def render_risk_markdown(risk: dict[str, Any]) -> str:
         f"- DECISION: final_level={risk.get('final_level')}",
         "",
         "## Dimension Scores",
+        "",
+        "FACT: contribution = score x weight, and weighted_score is their sum.",
+        "Sorted by contribution, so the dimensions that actually drove the level come first.",
+        "",
     ]
-    for item in explanation.get("dimension_explanations", []):
-        lines.append(f"- DECISION: {item.get('dimension')} score={item.get('score')} weight={item.get('weight')}")
+    # Ranked by contribution rather than config order: the previous flat list gave a
+    # maxed-out dimension the same visual weight as one contributing almost nothing.
+    ranked = sorted(explanation.get("dimension_explanations", []), key=_contribution, reverse=True)
+    peak = _contribution(ranked[0]) if ranked else 0.0
+    for item in ranked:
+        contribution = _contribution(item)
+        lines.append(
+            f"- {item.get('dimension')}: contribution {contribution:g} "
+            f"(score {item.get('score')} x weight {item.get('weight')}) {_bar(contribution, peak)}"
+        )
         for fact in item.get("evidence", [])[:4]:
             lines.append(f"  - {fact}")
     lines.extend(["", "## Guardrail Evaluations"])
-    for item in explanation.get("guardrail_evaluations", []):
+    # Only guardrails that matched get spelled out. The full per-guardrail record,
+    # including every not_matched one, stays in risk-assessment.yaml for audit; five
+    # "did not match current evidence" paragraphs here only buried the one that did.
+    evaluations = explanation.get("guardrail_evaluations", [])
+    matched = [item for item in evaluations if item.get("status") != "not_matched"]
+    unmatched = [item for item in evaluations if item.get("status") == "not_matched"]
+    for item in matched:
         lines.append(
             f"- DECISION: {item.get('id')} status={item.get('status')} strength={item.get('strength')} "
             f"needs_human_confirmation={item.get('needs_human_confirmation')}"
@@ -46,12 +90,17 @@ def render_risk_markdown(risk: dict[str, Any]) -> str:
         for fact in item.get("evidence", [])[:3]:
             lines.append(f"  - {fact.get('text', fact)}")
         lines.append(f"  - {item.get('decision')}")
+    if not matched:
+        lines.append("- FACT: no hard guardrail matched current evidence.")
+    if unmatched:
+        names = ", ".join(str(item.get("id")) for item in unmatched)
+        lines.append(f"- FACT: {len(unmatched)} guardrail(s) did not match: {names}")
     lines.extend(["", "## Decision Trace"])
     lines.extend(f"- {item}" for item in explanation.get("decision_trace", []) or risk.get("judgments", []))
     lines.extend(["", "## Required By Guardrails"])
-    lines.extend(f"- DECISION: {item}" for item in risk.get("required_by_guardrails", []) or ["none"])
+    lines.extend(f"- {item}" for item in risk.get("required_by_guardrails", []) or ["none"])
     lines.extend(["", "## Prohibited"])
-    lines.extend(f"- DECISION: {item}" for item in risk.get("prohibited", []) or ["none"])
+    lines.extend(f"- {item}" for item in risk.get("prohibited", []) or ["none"])
     return "\n".join(lines) + "\n"
 
 

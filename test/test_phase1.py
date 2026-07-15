@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -24,7 +25,7 @@ from adaptive_change_governance.intent_model import normalize_intent
 from adaptive_change_governance.reassessment import ReassessmentRunner
 from adaptive_change_governance.repository_analyzer import RepositoryAnalyzer
 from adaptive_change_governance.run_retention import cleanup_runs
-from adaptive_change_governance.risk_evaluator import LEVEL_ORDER, RiskEvaluator
+from adaptive_change_governance.risk_evaluator import LEVEL_ORDER, RiskEvaluator, render_risk_markdown
 from adaptive_change_governance.schema_validator import ValidationError, validate_all, validate_risk_calibration
 from adaptive_change_governance.workflow_composer import WorkflowComposer
 
@@ -59,6 +60,55 @@ class Phase1Test(unittest.TestCase):
         bad = {"version": 1, "level_thresholds": {"L2": 20, "L3": 10, "L4": 40}}
         with self.assertRaisesRegex(ValidationError, "level_thresholds.L3"):
             validate_risk_calibration(bad)
+
+    def _money_run(self):
+        evidence = RepositoryAnalyzer(ROOT).analyze("调整退款金额保留两位小数的计算方式。", self.project_risk)
+        risk = RiskEvaluator(self.project_risk, self.guardrails).evaluate(evidence)
+        workflow = WorkflowComposer(self.project_risk, self.modules).compose(evidence, risk)
+        return evidence, risk, workflow
+
+    def test_review_markdown_never_double_prefixes_bullets(self):
+        evidence, risk, workflow = self._money_run()
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            HumanReviewGate(self.modules).write_review_files(run_dir, evidence, risk, workflow)
+            review_md = (run_dir / "review.md").read_text(encoding="utf-8")
+        offenders = [line for line in review_md.splitlines() if line.lstrip().startswith("- - ")]
+        self.assertEqual([], offenders, f"markdown bullets were prefixed twice: {offenders[:3]}")
+
+    def test_review_markdown_keeps_guardrail_evidence_nested(self):
+        evidence, risk, workflow = self._money_run()
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            HumanReviewGate(self.modules).write_review_files(run_dir, evidence, risk, workflow)
+            review_md = (run_dir / "review.md").read_text(encoding="utf-8")
+        section = review_md.split("## Guardrail Evidence", 1)[1].split("##", 1)[0]
+        bullets = [line for line in section.splitlines() if line.strip()]
+        # The triggered guardrail sits at the top level and its supporting facts hang
+        # under it. A flat section means the evidence hierarchy was lost again.
+        self.assertTrue(any(line.startswith("- ") for line in bullets), section)
+        self.assertTrue(any(line.startswith("  - ") for line in bullets), section)
+
+    def test_risk_markdown_ranks_dimensions_by_contribution(self):
+        _, risk, _ = self._money_run()
+        markdown = render_risk_markdown(risk)
+        section = markdown.split("## Dimension Scores", 1)[1].split("## Guardrail", 1)[0]
+        contributions = [float(value) for value in re.findall(r"contribution ([0-9.]+)", section)]
+        self.assertEqual(len(risk["risk_dimensions"]), len(contributions))
+        self.assertEqual(sorted(contributions, reverse=True), contributions)
+        self.assertAlmostEqual(risk["weighted_score"], sum(contributions), places=2)
+
+    def test_risk_markdown_collapses_unmatched_guardrails_but_yaml_keeps_them(self):
+        _, risk, _ = self._money_run()
+        markdown = render_risk_markdown(risk)
+        evaluations = risk["risk_explanation"]["guardrail_evaluations"]
+        unmatched = [item for item in evaluations if item["status"] == "not_matched"]
+        self.assertTrue(unmatched, "fixture should leave some guardrails unmatched")
+        # Collapsed to one line in the human-facing render...
+        self.assertIn(f"{len(unmatched)} guardrail(s) did not match", markdown)
+        self.assertNotIn("did not match current evidence", markdown)
+        # ...but every guardrail stays in the audit record.
+        self.assertEqual(len(self.guardrails["level_overrides"]), len(evaluations))
 
     def test_money_change_triggers_hard_guardrail_and_required_modules(self):
         evidence = RepositoryAnalyzer(ROOT).analyze("调整退款金额保留两位小数的计算方式。", self.project_risk)

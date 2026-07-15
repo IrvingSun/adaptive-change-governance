@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +13,33 @@ from .workflow_composer import LEVEL_MODULES, WorkflowComposer
 
 
 LEVEL_ORDER = {"L1": 1, "L2": 2, "L3": 3, "L4": 4}
+
+
+def _as_markdown_list(lines: list[str]) -> list[str]:
+    """Re-emit console-shaped helper output as real Markdown lists.
+
+    The helpers are shared with the plain-text console renderers, where evidence
+    hierarchy is carried by leading spaces. Markdown does not read indentation that
+    way: an unbulleted 4-space line is swallowed into the parent bullet's paragraph,
+    so nested facts silently lose their level. Map indent depth onto list nesting
+    instead, and never re-prefix a line that already carries its own bullet.
+    """
+    out = []
+    for line in lines:
+        indent = len(line) - len(line.lstrip(" "))
+        body = line.strip()
+        if not body:
+            continue
+        nesting = "  " * max(0, (indent - 2) // 2)
+        if re.match(r"\d+\. ", body):
+            # Already an ordered step; a "- 1. foo" bullet would nest a number inside
+            # a bullet and read as two competing list markers.
+            out.append(f"{nesting}{body}")
+            continue
+        if body.startswith("- "):
+            body = body[2:]
+        out.append(f"{nesting}- {body}")
+    return out
 
 
 class ReviewError(ValueError):
@@ -291,13 +319,15 @@ class HumanReviewGate:
             f"- FACT: triggered guardrails: {risk.get('triggered_guardrails', [])}",
             f"- FACT: hard-required modules: {risk.get('required_by_guardrails', [])}",
             "",
+            # No FACT/DECISION labels here: these are instructions, not judgments, and
+            # labelling every line drains the labels of meaning where they do matter.
             "## Review Commands",
-            "- DECISION: Use `change-assess --review-workflow <run_id>` to inspect risk, evidence, and recommended execution steps.",
-            "- DECISION: Use `change-assess --approve-workflow <run_id>` to approve.",
-            "- DECISION: Use `--add-required`, `--add-optional`, `--raise-level`, `--user-fact`, or `--correction` to adjust the workflow from CLI flags.",
-            "- DECISION: Use `change-assess --review-decision <run_id> --decision reassess --comment \"reason\"` to request reassessment.",
-            "- DECISION: Do not ask users to manually edit `human-review.yaml`; it is retained as an audit file.",
-            "- DECISION: User may not lower final level or remove modules required by hard guardrails or final risk level.",
+            "- Inspect risk, evidence, and recommended steps: `change-assess --review-workflow <run_id>`",
+            "- Approve: `change-assess --approve-workflow <run_id>`",
+            "- Adjust the workflow: `--add-required`, `--add-optional`, `--raise-level`, `--user-fact`, `--correction`",
+            "- Request reassessment: `change-assess --review-decision <run_id> --decision reassess --comment \"reason\"`",
+            "- `human-review.yaml` is an audit file; do not edit it by hand.",
+            "- CONSTRAINT: you may not lower the final level, nor remove modules required by hard guardrails or by the final risk level.",
             "",
             "## Example Approval Commands",
             "```bash",
@@ -307,12 +337,12 @@ class HumanReviewGate:
             "",
             "## Recommended Execution Steps",
         ]
-        lines.extend(f"- DECISION: {line.strip()}" for line in self._step_lines(rec.get("required_modules", []), risk))
+        lines.extend(_as_markdown_list(self._step_lines(rec.get("required_modules", []), risk)))
         lines.extend([
             "",
             "## Guardrail Evidence",
         ])
-        lines.extend(f"- {line.strip()}" for line in self._guardrail_evidence_lines(risk))
+        lines.extend(_as_markdown_list(self._guardrail_evidence_lines(risk)))
         lines.extend([
             "",
             "## Current Unknowns",
@@ -322,7 +352,7 @@ class HumanReviewGate:
             "",
             "## Investigation Questions",
         ])
-        lines.extend(f"- {line.strip()}" for line in self._investigation_question_lines(evidence))
+        lines.extend(_as_markdown_list(self._investigation_question_lines(evidence)))
         return "\n".join(lines) + "\n"
 
     def _validate_review_shape(self, review: dict[str, Any]) -> None:
