@@ -354,7 +354,11 @@ change-assess --ci-gate origin/main --ci-fail-level L3 --ci-output gate-summary.
 
 `--ci-gate` scores the diff against a base ref **from code facts only** — no request text and no intent file, so nothing in the working tree can talk the verdict down. Domains come from `code_signals` on the changed code, destructive operations from statements the diff *adds*, blast radius from `reference_scanner`, plus configured `file_risk`. It exits `3` when the level reaches `--ci-fail-level` (default `L3`), meaning *a human must review this*, not *this change is wrong*.
 
-`.github/workflows/change-governance.yml` runs it on every pull request. To make it binding, mark `governance-gate` as a required status check and require a human review on protected branches — a review approval is the one signal an agent cannot forge.
+`.github/workflows/change-governance.yml` runs it on every pull request. Mark `governance-gate` as a required status check on protected branches to make it binding.
+
+The check is designed to be **clearable**, which matters: GitHub does not let a review approval override a failing required check, so a gate that merely failed on high risk would make every L3/L4 pull request unmergeable forever. Instead, when the gate reports `review_required`, the workflow queries the pull request's reviews and passes once a human *other than the author* has submitted an approving review. It also triggers on `pull_request_review`, because GitHub does not re-run `pull_request` workflows when a review lands — without that, the check would never clear.
+
+Net effect: low-risk pull requests merge without ceremony; high-risk ones need a human approval, which is the one signal an agent cannot forge.
 
 Known artifact: run against this repository, the gate flags `financial-calculation` and `physical-device-control`, because its own test fixtures and pattern definitions literally contain `power_off(...)` and `round(price * qty, 2)`. That is self-reference, not a finding on a normal target repository.
 

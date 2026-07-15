@@ -62,11 +62,20 @@ class DiffVerifier:
         tracked_changed = self._changed_files()
         changed_files = tracked_changed + untracked_files
         allowed_files = self._allowed_files(approved_plan)
-        unexpected_files = sorted(path for path in changed_files if allowed_files and path not in allowed_files)
+        # Fail closed: an empty approved list means *no* file is approved, not
+        # "every file is fine". Localization can legitimately find nothing (a
+        # cross-language request), which produced an empty files_to_modify, an
+        # approvable plan, and a scope check that silently passed any diff.
+        unexpected_files = sorted(path for path in changed_files if path not in allowed_files)
         added_lines = self._added_lines(diff_text) + self._untracked_lines(untracked_files)
         low_risk_check = self._low_risk_check(evidence, added_lines)
         errors = []
-        if unexpected_files:
+        if unexpected_files and not allowed_files:
+            errors.append(
+                "approved technical plan lists no files_to_modify, so no file change is in scope; "
+                "add the intended paths and re-approve the plan"
+            )
+        elif unexpected_files:
             errors.append("diff touches files outside approved technical plan: " + ", ".join(unexpected_files))
         errors.extend(low_risk_check["errors"])
         report = {

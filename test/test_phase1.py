@@ -998,10 +998,19 @@ class Phase1Test(unittest.TestCase):
             self.assertEqual(proposed.returncode, 0, proposed.stderr + proposed.stdout)
             self.assertTrue((run_dir / "technical-plan.yaml").exists())
             plan = load_yaml(run_dir / "technical-plan.yaml")
-            self.assertEqual("pass", plan["validation"]["status"])
+            # The generated plan is skeletal: localization found no file here, so it
+            # approves no scope and must not be approvable as-is.
+            self.assertEqual("blocked", plan["validation"]["status"])
+            self.assertTrue(any("files_to_modify" in error for error in plan["validation"]["errors"]))
             self.assertIn("edit copy text", plan["scope"]["included"])
             for module in load_yaml(run_dir / "approved-workflow.yaml")["workflow_recommendation"]["required_modules"]:
                 self.assertIn(module, plan["module_coverage"])
+
+            # The agent fills in the concrete scope before asking for approval.
+            plan["implementation_plan"]["files_to_modify"] = [
+                {"path": "app/copy.py", "action": "modify", "reason": "FACT: holds the order page copy"}
+            ]
+            dump_yaml(run_dir / "technical-plan.yaml", plan)
 
             blocked_gate = subprocess.run(
                 [sys.executable, str(temp / "bin/change-assess"), "--check-gate", run_dir.name, "--stage", "implementation"],
@@ -1736,6 +1745,37 @@ class Phase1Test(unittest.TestCase):
             shutil.rmtree(temp)
 
 
+class ApprovedScopeTest(unittest.TestCase):
+    """An approved plan with no files must not disable diff scope enforcement."""
+
+    def setUp(self):
+        self.project_risk = load_yaml(ROOT / ".ai-governance/project-risk.yaml")
+
+    def test_empty_approved_file_list_blocks_every_changed_file(self):
+        temp = Path(tempfile.mkdtemp())
+        try:
+            for args in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
+                subprocess.run(["git", *args], cwd=temp, check=True, capture_output=True)
+            (temp / "app").mkdir()
+            (temp / "app/anything.py").write_text("VALUE = 1\n", encoding="utf-8")
+            subprocess.run(["git", "add", "-A"], cwd=temp, check=True, capture_output=True)
+            subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=temp, check=True, capture_output=True)
+
+            run_dir = temp / ".ai-governance/runs/run-scope"
+            run_dir.mkdir(parents=True)
+            dump_yaml(run_dir / "evidence-pack.yaml", {"request": {"original": "x", "model_intent": {}}, "code_findings": {}})
+            # Localization found nothing, so the approved plan approves no file.
+            dump_yaml(run_dir / "approved-technical-plan.yaml", {"implementation_plan": {"files_to_modify": []}})
+            (temp / "app/anything.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+            report = DiffVerifier(temp).verify(run_dir)
+            self.assertEqual("blocked", report["status"])
+            self.assertIn("app/anything.py", report["unexpected_files"])
+            self.assertTrue(any("no files_to_modify" in error for error in report["errors"]))
+        finally:
+            shutil.rmtree(temp)
+
+
 class CiGateTest(unittest.TestCase):
     """The CI gate is the only enforcement an agent cannot write around.
 
@@ -1960,6 +2000,12 @@ class VerificationGapTest(unittest.TestCase):
             self.assertEqual(0, proposed.returncode, proposed.stderr + proposed.stdout)
             plan = load_yaml(run_dir / "technical-plan.yaml")
             self.assertEqual("planned", plan["module_coverage"]["business_rule_confirmation"]["status"])
+            # Give the plan a concrete scope so this test isolates guardrail blocking
+            # rather than the separate empty-files_to_modify rule.
+            plan["implementation_plan"]["files_to_modify"] = [
+                {"path": "app/billing.py", "action": "modify", "reason": "FACT: holds refund_amount"}
+            ]
+            dump_yaml(run_dir / "technical-plan.yaml", plan)
 
             blocked = run_cli("--approve-technical-plan", run_dir.name)
             self.assertEqual(3, blocked.returncode, blocked.stderr + blocked.stdout)

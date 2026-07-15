@@ -196,6 +196,17 @@ class TechnicalPlanGate:
                 errors.append(f"required module {module} claims covered without evidence")
             if not item.get("evidence") and not item.get("decision"):
                 errors.append(f"required module {module} needs evidence or decision")
+        # An implementation plan with no files approves nothing, yet diff
+        # verification has only that list to check scope against. Catch it here,
+        # where the message can say what to do, rather than at diff time.
+        goal = approved_workflow.get("workflow_recommendation", {}).get("request_goal", {})
+        if goal.get("type") == "implementation" or goal.get("requires_code_change") is True:
+            files = plan.get("implementation_plan", {}).get("files_to_modify") or []
+            if not [item for item in files if isinstance(item, dict) and str(item.get("path", "")).strip()]:
+                errors.append(
+                    "implementation plan must list at least one file in implementation_plan.files_to_modify; "
+                    "an empty list leaves diff verification with no approved scope"
+                )
         prohibited = set(approved_workflow.get("workflow_recommendation", {}).get("prohibited", []))
         plan_prohibited = set(plan.get("scope", {}).get("prohibited", [])) | set(plan.get("implementation_plan", {}).get("prohibited_actions", []))
         missing_prohibited = sorted(prohibited - plan_prohibited)

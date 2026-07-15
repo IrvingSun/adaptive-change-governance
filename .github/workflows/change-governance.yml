@@ -5,12 +5,24 @@ name: Change Governance
 # Codex CLI — an agent with shell access can write around all of it. This job runs
 # where the agent cannot write, and scores the diff from code facts alone.
 #
-# The job only produces a verdict. To make it binding, mark "governance-gate" as a
-# required status check and require a human review on protected branches: a review
-# approval is the one signal an agent cannot forge.
+# The check must be *clearable*, or it is useless as a required check: GitHub does
+# not let a review approval override a failing required check, so a gate that simply
+# failed on high risk would make every L3/L4 pull request unmergeable forever.
+# Instead, a high-risk pull request fails until a human other than the author submits
+# an approving review, then passes. That is why pull_request_review is a trigger —
+# GitHub does not re-run pull_request workflows when a review is submitted.
+#
+# Make it binding: mark "governance-gate" a required status check on protected
+# branches. A review approval is the one signal an agent cannot forge.
 
 on:
   pull_request:
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions:
+  contents: read
+  pull-requests: read
 
 jobs:
   governance-gate:
@@ -33,12 +45,39 @@ jobs:
             --ci-gate "origin/${{ github.base_ref }}" \
             --ci-fail-level L3 \
             --ci-output gate-summary.md
-          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          code=$?
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          # 0 = pass, 3 = human review required. Any other code is a real tool or
+          # config error and must fail here, not as a confusing error downstream.
+          if [ "$code" -ne 0 ] && [ "$code" -ne 3 ]; then
+            echo "::error::change-assess --ci-gate failed with exit code $code"
+            exit "$code"
+          fi
       - name: Publish summary
         if: always()
-        run: cat gate-summary.md >> "$GITHUB_STEP_SUMMARY"
-      - name: Require human review for high-risk changes
-        if: steps.gate.outputs.exit_code == '3'
         run: |
-          echo "::error::This pull request reached the review threshold. A human reviewer must approve it."
-          exit 1
+          if [ -f gate-summary.md ]; then
+            cat gate-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The governance gate produced no summary; see the scoring step for the error." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Require human approval for high-risk changes
+        if: steps.gate.outputs.exit_code == '3'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Count each reviewer's latest state only, and never the author's own.
+          approvals=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/reviews" \
+            --jq "[.[] | select(.user.login != \"$PR_AUTHOR\")]
+                  | group_by(.user.login) | map(last)
+                  | map(select(.state == \"APPROVED\")) | length")
+          if [ "${approvals:-0}" -ge 1 ]; then
+            echo "Governance gate: review threshold reached, and ${approvals} human approval(s) are present."
+          else
+            echo "::error::This change reached the review threshold. It stays blocked until a human other than the author submits an approving review; the check re-runs automatically when that review is submitted."
+            exit 1
+          fi
